@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Configurable host emails or admin claim
+    function isHost() {
+      return isAuthenticated() && 
+        (request.auth.token.admin == true || 
+         request.auth.token.email.matches('.*@gmail[.]com') ||
+         request.auth.token.email.matches('.*gdg.*'));
+    }
+
+    // Name reservation: create-only! Cannot overwrite or delete
+    match /name_reservations/{nameId} {
+      allow read: if true;
+      allow create: if request.resource.data.displayName is string &&
+                    request.resource.data.displayName.size() >= 2 &&
+                    request.resource.data.displayName.size() <= 24;
+      allow update, delete: if false;
+    }
+
+    // Single fixed event document
+    match /events/{eventId} {
+      // Anyone can read event state (agents follow host timing & station)
+      allow read: if true;
+      
+      // Only authenticated host can change event state, station, deadlines, or health
+      allow write: if isHost();
+
+      // Agents subcollection
+      match /agents/{agentId} {
+        allow read: if true;
+
+        // An agent can register themselves once with initial 0 score
+        allow create: if isAuthenticated() && 
+                      request.resource.data.score == 0 &&
+                      request.resource.data.id == agentId;
+
+        // Agents can update their answer choices or bet, or host can compute scores
+        allow update: if isHost() || (isAuthenticated() && request.auth.uid == agentId);
+
+        // Only host can kick agents
+        allow delete: if isHost();
+      }
+    }
+  }
+}
