@@ -1,592 +1,586 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { EventState, Agent, KillFeedItem, StationId, Squad, Subphase } from './types/game';
-import { GameService, INITIAL_EVENT_STATE, getServerNow } from './services/firebase';
+import { 
+  Shield, 
+  Terminal as TerminalIcon, 
+  Zap, 
+  AlertTriangle, 
+  Volume2, 
+  VolumeX, 
+  CheckCircle2, 
+  Clock, 
+  Server,
+  Layers,
+  Lock,
+  ArrowRight
+} from 'lucide-react';
+import { Agent, EventState, Squad } from './types/game';
+import { SQUADS } from './data/gameData';
 import { 
   initAudio, 
   setMuted, 
   isMuted, 
   sfx, 
-  startHum, 
-  stopHum, 
   startSiren, 
   stopSiren, 
   startHeartbeat, 
   stopHeartbeat, 
+  startHum, 
+  stopHum, 
   stopAll 
 } from './services/audioService';
-import { deriveTimelineState, TOTAL_ROUND_SECONDS, TimelineState } from './services/timelineService';
-import { HostScreen } from './components/HostScreen';
-import { AgentJoinView } from './components/AgentJoinView';
-import { AgentPhoneView } from './components/AgentPhoneView';
-import { HallOfDefenders } from './components/HallOfDefenders';
+import { GameService } from './services/firebase';
+import { InteractiveTerminal } from './components/InteractiveTerminal';
+import { MemoryVisualizer } from './components/MemoryVisualizer';
+import { StageDecisions } from './components/StageDecisions';
+import { LeaderboardView } from './components/LeaderboardView';
 
-export function App() {
-  const [eventState, setEventState] = useState<EventState>(INITIAL_EVENT_STATE);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [killFeed, setKillFeed] = useState<KillFeedItem[]>([]);
-  const [currentAgentId, setCurrentAgentId] = useState<string | null>(null);
+const TOTAL_MISSION_SECONDS = 180; // 3 minutes strictly
 
-  // Read URL query params
-  const [urlParams] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return new URLSearchParams(window.location.search);
-    }
-    return new URLSearchParams();
-  });
+export const App: React.FC = () => {
+  // Game Lifecycle: 'LOBBY' | 'PLAYING' | 'CONCLUDED'
+  const [gameState, setGameState] = useState<'LOBBY' | 'PLAYING' | 'CONCLUDED'>('LOBBY');
+  
+  // Player State
+  const [nickname, setNickname] = useState<string>('');
+  const [selectedSquad, setSelectedSquad] = useState<Squad>('sentinels');
+  const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
+  const [score, setScore] = useState<number>(0);
+  const [correctDecisionsCount, setCorrectDecisionsCount] = useState<number>(0);
+  const [totalDecisionsCount, setTotalDecisionsCount] = useState<number>(0);
+  const [investigationCategories, setInvestigationCategories] = useState<Set<string>>(new Set());
 
-  const isHostMode = urlParams.get('screen') === 'host' || urlParams.get('view') === 'host';
-  const timeScale = Number(urlParams.get('timeScale') || urlParams.get('speed') || 1);
+  // Mission State
+  const [currentStage, setCurrentStage] = useState<number>(1); // 1, 2, 3, 4
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(TOTAL_MISSION_SECONDS);
+  const [missionOutcome, setMissionOutcome] = useState<'SECURED' | 'TIMEOUT'>('TIMEOUT');
+  const [pointerCleared, setPointerCleared] = useState<boolean>(false);
+  const [patchDeployed, setPatchDeployed] = useState<boolean>(false);
 
-  const [mutedState, setMutedState] = useState<boolean>(isMuted());
-  const [registerSubmitting, setRegisterSubmitting] = useState<boolean>(false);
-  const [registerError, setRegisterError] = useState<string>('');
-  const [lobbyRemaining, setLobbyRemaining] = useState<number | null>(null);
+  // Global Leaderboard & Cloud State
+  const [agentsList, setAgentsList] = useState<Agent[]>([]);
 
-  // Audio trigger tracking refs to avoid duplicate fire
-  const lastSubphaseRef = useRef<Subphase | null>(null);
-  const lastStationRef = useRef<number | null>(null);
-  const lastPhaseRef = useRef<string | null>(null);
-  const lastLobbySecondBeepRef = useRef<number | null>(null);
+  // Mobile View Tabs
+  const [activeMobileTab, setActiveMobileTab] = useState<'terminal' | 'memory' | 'decisions'>('memory');
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
 
-  // 1. Initial Subscriptions to Firebase / Local Reactive Bus
+  // 1. Initial Cloud Sync Subscription
   useEffect(() => {
-    let savedId = '';
-    try {
-      savedId = sessionStorage.getItem('ovl2_agent_id') || localStorage.getItem('ovl2_agent_id') || '';
-    } catch {}
-    if (savedId) {
-      setCurrentAgentId(savedId);
-    }
-
-    const unsubEvent = GameService.subscribeToEvent((state) => {
-      setEventState(state);
+    const unsub = GameService.subscribeToAgents((list) => {
+      setAgentsList(list);
     });
-
-    const unsubAgents = GameService.subscribeToAgents((list) => {
-      setAgents(list);
-    });
-
-    const unsubKillFeed = GameService.subscribeToKillFeed((items) => {
-      setKillFeed(items);
-    });
-
-    return () => {
-      unsubEvent();
-      unsubAgents();
-      unsubKillFeed();
-      stopAll();
-    };
+    return () => unsub();
   }, []);
 
-  // 2. Authoritative Autopilot & Central Clock Derivation Loop (Runs on Host or Fallback)
+  // 2. Authoritative 180s Mission Countdown
   useEffect(() => {
-    const effectiveTimeScale = eventState.timeScale && eventState.timeScale > 1 ? eventState.timeScale : timeScale;
+    if (gameState !== 'PLAYING') return;
 
-    const timer = setInterval(() => {
-      const now = getServerNow();
+    startSiren();
 
-      // CASE A: LOBBY (roundStartAt is null)
-      if (!eventState.roundStartAt) {
-        if (agents.length >= 1) {
-          // If lobby timer hasn't started yet, host client starts it
-          let lobbyStart = eventState.lobbyStartAt;
-          if (!lobbyStart && isHostMode) {
-            lobbyStart = now;
-            GameService.updateEventState({ lobbyStartAt: lobbyStart });
-          }
-
-          const lobbyDuration = Number(import.meta.env.VITE_LOBBY_SECONDS || 45);
-          const elapsedLobby = lobbyStart ? ((now - lobbyStart) / 1000) * effectiveTimeScale : 0;
-          const remaining = Math.max(0, Math.ceil(lobbyDuration - elapsedLobby));
-          setLobbyRemaining(remaining);
-
-          // T-10s to T-3s: Soft warn beep each second
-          if (remaining <= 10 && remaining > 3) {
-            if (lastLobbySecondBeepRef.current !== remaining) {
-              lastLobbySecondBeepRef.current = remaining;
-              sfx.warn();
-            }
-          }
-          // T-3s to T-1s: Glitch burst
-          if (remaining <= 3 && remaining > 0) {
-            if (lastLobbySecondBeepRef.current !== remaining) {
-              lastLobbySecondBeepRef.current = remaining;
-              sfx.glitch();
-            }
-          }
-
-          // T-0s: Automatic breach launch!
-          if (remaining === 0 && isHostMode && eventState.autopilot) {
-            startSiren();
-            GameService.updateEventState({
-              roundStartAt: now,
-              status: 'INCIDENT_ACTIVE',
-              activeAlarm: true,
-              threatLevel: 4,
-              currentStation: 1
-            });
-          }
-        } else {
-          setLobbyRemaining(null);
+    const interval = setInterval(() => {
+      setSecondsRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleMissionTimeout();
+          return 0;
         }
-        return;
-      }
 
-      // CASE B: INCIDENT / SECURED (roundStartAt is active)
-      let elapsedSec = 0;
-      if (eventState.status === 'PAUSED') {
-        elapsedSec = eventState.pausedOffsetSec;
-      } else {
-        const rawElapsed = (now - eventState.roundStartAt) / 1000;
-        elapsedSec = (rawElapsed * effectiveTimeScale) + (eventState.pausedOffsetSec || 0);
-      }
-
-      const timeline = deriveTimelineState(elapsedSec, eventState.sharedServerHealth);
-
-      // Heartbeat sound in last 10s of any station or if health is critical
-      if (timeline.last10SecondsPulse && !eventState.status.includes('PAUSED')) {
-        startHeartbeat(100);
-      } else {
-        stopHeartbeat();
-      }
-
-      // Detect milestone changes to fire sound triggers
-      if (timeline.phase !== lastPhaseRef.current) {
-        if (timeline.phase === 'BREACH') {
-          startSiren();
-          sfx.glitch();
-        } else if (timeline.phase === 'DOOR') {
-          sfx.unlock();
-        } else if (timeline.phase === 'SECURED') {
-          stopSiren();
-          stopHeartbeat();
-          sfx.chime();
-          startHum();
+        // Final 30s tension: start heartbeat
+        if (prev === 31) {
+          startHeartbeat(110);
         }
-        lastPhaseRef.current = timeline.phase;
-      }
 
-      if (timeline.currentStation !== lastStationRef.current) {
-        lastStationRef.current = timeline.currentStation;
-      }
-
-      if (timeline.subphase !== lastSubphaseRef.current) {
-        if (timeline.subphase === 'BREAK') {
+        // Warning sound in last 10s
+        if (prev <= 10 && prev > 1) {
           sfx.warn();
         }
-        lastSubphaseRef.current = timeline.subphase;
-      }
 
-      // Scripted event sounds
-      if (timeline.scriptedEvent === 'ATTACK_WAVE') {
-        sfx.glitch();
-      } else if (timeline.scriptedEvent === 'POWER_FLICKER') {
-        sfx.error();
-      } else if (timeline.scriptedEvent === 'FREEZE_SPAWN') {
-        sfx.powerup();
-      }
-
-      // Sync state back if host
-      if (isHostMode) {
-        const shouldConclude = timeline.phase === 'SECURED' && eventState.status !== 'CONCLUDED';
-        
-        GameService.updateEventState({
-          currentStation: timeline.currentStation,
-          subphase: timeline.subphase,
-          subphaseTimeRemaining: timeline.stationTimeRemaining,
-          totalTimeRemaining: timeline.totalTimeRemaining,
-          threatLevel: timeline.threatLevel,
-          activeAlarm: timeline.activeAlarm,
-          doorCode: timeline.doorCode,
-          doorCodeExpiresIn: timeline.doorCodeExpiresIn,
-          scriptedEvent: timeline.scriptedEvent,
-          status: shouldConclude ? 'CONCLUDED' : eventState.status
-        });
-
-        // Auto-loop for event booths (40s after results screen)
-        if (eventState.autoLoop && timeline.phase === 'SECURED' && elapsedSec >= TOTAL_ROUND_SECONDS + 40) {
-          GameService.resetEvent();
-          stopAll();
-          startHum();
-        }
-      }
-
-    }, 250);
-
-    return () => clearInterval(timer);
-  }, [isHostMode, eventState.roundStartAt, eventState.lobbyStartAt, eventState.status, eventState.pausedOffsetSec, eventState.autopilot, agents.length, timeScale]);
-
-  // Current logged in agent object
-  const currentAgent = agents.find((a) => a.id === currentAgentId);
-
-  // Agent Registration Handler
-  const handleRegisterAgent = async (displayName: string, squad: Squad) => {
-    initAudio();
-    setRegisterSubmitting(true);
-    setRegisterError('');
-
-    try {
-      const normalized = await GameService.reserveAgentName(displayName);
-      const agentId = await GameService.ensureAgentAuth();
-
-      const newAgent: Agent = {
-        id: agentId,
-        normalizedName: normalized,
-        displayName: displayName.trim(),
-        squad,
-        score: 0,
-        combo: 1,
-        highestCombo: 1,
-        badges: [],
-        stationScores: { station1: 0, station2: 0, station3: 0, station4: 0 },
-        joinedAt: Date.now(),
-        lastActive: Date.now()
-      };
-
-      await GameService.registerAgent(newAgent);
-      setCurrentAgentId(agentId);
-      sfx.unlock();
-
-      // If this is the first agent, trigger lobby countdown
-      if (!eventState.lobbyStartAt) {
-        GameService.updateEventState({ lobbyStartAt: getServerNow() });
-      }
-
-      GameService.publishKillFeedItem({
-        agentName: newAgent.displayName,
-        squad: newAgent.squad,
-        action: 'انضم إلى غرفة العمليات',
-        points: 0
+        return prev - 1;
       });
-    } catch (err: any) {
-      setRegisterError(err.message || 'حدث خطأ أثناء التسجيل');
-      sfx.error();
-    } finally {
-      setRegisterSubmitting(false);
-    }
-  };
+    }, 1000);
 
-  // Agent Score Update
-  const handleUpdateScore = (points: number, actionDescription: string) => {
-    if (!currentAgent) return;
+    return () => {
+      clearInterval(interval);
+      stopSiren();
+      stopHeartbeat();
+    };
+  }, [gameState]);
 
-    const newScore = Math.max(0, Math.min(1000, currentAgent.score + points));
-    const newCombo = currentAgent.combo;
-    const newHighestCombo = Math.max(currentAgent.highestCombo || 1, newCombo);
-
-    const updatedBadges = [...(currentAgent.badges || [])];
-    if (newCombo >= 5 && !updatedBadges.includes('COMBO_BREAKER')) updatedBadges.push('COMBO_BREAKER');
-    if (eventState.currentStation === 1 && newScore >= 200 && !updatedBadges.includes('ZERO_LEAK')) updatedBadges.push('ZERO_LEAK');
-    if (eventState.currentStation === 2 && newScore >= 400 && !updatedBadges.includes('POINTER_CUTTER')) updatedBadges.push('POINTER_CUTTER');
-
-    GameService.updateAgent(currentAgent.id, {
-      score: newScore,
-      highestCombo: newHighestCombo,
-      badges: updatedBadges
-    });
-
-    GameService.publishKillFeedItem({
-      agentName: currentAgent.displayName,
-      squad: currentAgent.squad,
-      action: actionDescription,
-      points
-    });
-
-    if (points > 0) {
-      sfx.tick(newCombo);
-      GameService.updateEventState({
-        sharedServerHealth: Math.min(100, eventState.sharedServerHealth + 1),
-        exposedSitesCount: Math.max(10000, eventState.exposedSitesCount - 850)
-      });
-    } else if (points < 0) {
-      sfx.error();
-      GameService.updateEventState({
-        sharedServerHealth: Math.max(0, eventState.sharedServerHealth - 3),
-        exposedSitesCount: eventState.exposedSitesCount + 2400
-      });
-    }
-  };
-
-  const handleUpdateCombo = (combo: number) => {
-    if (!currentAgent) return;
-    GameService.updateAgent(currentAgent.id, {
-      combo,
-      highestCombo: Math.max(currentAgent.highestCombo || 1, combo)
-    });
-  };
-
-  const handleBetSubmitted = (choiceId: string, stake: number) => {
-    if (!currentAgent) return;
-    sfx.keyClick();
-    const updatedBadges = [...(currentAgent.badges || [])];
-    if (choiceId === 'opt-a' && !updatedBadges.includes('PATCH_MASTER')) {
-      updatedBadges.push('PATCH_MASTER');
-    }
-
-    GameService.updateAgent(currentAgent.id, {
-      betChoice: choiceId,
-      betStake: stake,
-      badges: updatedBadges
-    });
-
-    const stats = { ...eventState.betStatistics };
-    if (choiceId === 'opt-a') stats.optionA += 1;
-    if (choiceId === 'opt-b') stats.optionB += 1;
-    if (choiceId === 'opt-c') stats.optionC += 1;
-    if (choiceId === 'opt-d') stats.optionD += 1;
-
-    GameService.updateEventState({ betStatistics: stats });
-  };
-
-  const handleSquadNodeAction = (squad: Squad, nodeId: string, newStatus: 'patched' | 'restarted' | 'verified') => {
-    sfx.keyClick();
-    const squadNodes = [...(eventState.squadBattle[squad] || [])];
-    const nodeIdx = squadNodes.findIndex((n) => n.id === nodeId);
-    if (nodeIdx >= 0) {
-      squadNodes[nodeIdx] = { ...squadNodes[nodeIdx], status: newStatus };
-      const allVerified = squadNodes.every((n) => n.status === 'verified');
-      const winning = allVerified && !eventState.squadBattle.winningSquad ? squad : eventState.squadBattle.winningSquad;
-
-      GameService.updateEventState({
-        squadBattle: {
-          ...eventState.squadBattle,
-          [squad]: squadNodes,
-          winningSquad: winning
-        }
-      });
-    }
-  };
-
-  const handleDoorCodeUnlocked = () => {
-    if (!currentAgent) return;
-    sfx.unlock();
-    GameService.updateAgent(currentAgent.id, {
-      doorCodeUnlockedAt: Date.now(),
-      score: currentAgent.score + 50
-    });
-  };
-
-  // HOST OVERRIDE HANDLERS (Requirement 1 & 6)
-  const handleStartNow = () => {
-    initAudio();
-    startSiren();
-    GameService.updateEventState({
-      roundStartAt: getServerNow(),
-      status: 'INCIDENT_ACTIVE',
-      activeAlarm: true,
-      threatLevel: 4,
-      currentStation: 1,
-      pausedAt: null,
-      pausedOffsetSec: 0
-    });
-  };
-
-  const handlePauseResume = () => {
-    initAudio();
-    sfx.keyClick();
-    const now = getServerNow();
-    if (eventState.status === 'PAUSED') {
-      // Resume: reconstruct roundStartAt from pausedOffsetSec
-      const effectiveScale = eventState.timeScale || timeScale || 1;
-      const newStartAt = now - (eventState.pausedOffsetSec / effectiveScale * 1000);
-      GameService.updateEventState({
-        status: 'INCIDENT_ACTIVE',
-        roundStartAt: newStartAt,
-        pausedAt: null
-      });
-    } else {
-      // Pause
-      let currentOffset = eventState.pausedOffsetSec;
-      if (eventState.roundStartAt) {
-        const effectiveScale = eventState.timeScale || timeScale || 1;
-        currentOffset = ((now - eventState.roundStartAt) / 1000) * effectiveScale + eventState.pausedOffsetSec;
-      }
-      GameService.updateEventState({
-        status: 'PAUSED',
-        pausedAt: now,
-        pausedOffsetSec: currentOffset
-      });
-    }
-  };
-
-  const handleSkipStation = () => {
+  // Handle start mission
+  const handleStartMission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = nickname.trim() || `Agent_${Math.floor(100 + Math.random() * 900)}`;
     initAudio();
     sfx.unlock();
-    const now = getServerNow();
-    const effectiveScale = eventState.timeScale || timeScale || 1;
-    // Station starts: St1=8s, St2=56s, St3=104s, St4=152s, St5=210s
-    const milestones = [8, 56, 104, 152, 210];
-    let currentElapsed = 0;
-    if (eventState.roundStartAt) {
-      currentElapsed = ((now - eventState.roundStartAt) / 1000) * effectiveScale + eventState.pausedOffsetSec;
-    }
-    const nextMilestone = milestones.find((m) => m > currentElapsed + 1) || 210;
-    const newStartAt = now - (nextMilestone / effectiveScale * 1000);
 
-    GameService.updateEventState({
-      roundStartAt: newStartAt,
-      pausedOffsetSec: 0,
-      pausedAt: null,
-      status: nextMilestone >= 210 ? 'CONCLUDED' : 'INCIDENT_ACTIVE'
-    });
+    const newAgent: Agent = {
+      id: `agent_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      normalizedName: cleanName.toLowerCase(),
+      displayName: cleanName,
+      squad: selectedSquad,
+      score: 0,
+      combo: 1,
+      highestCombo: 1,
+      badges: [],
+      stationScores: {
+        station1: 0,
+        station2: 0,
+        station3: 0,
+        station4: 0,
+      },
+      joinedAt: Date.now(),
+      lastActive: Date.now()
+    };
+
+    setCurrentAgent(newAgent);
+    setScore(0);
+    setCorrectDecisionsCount(0);
+    setTotalDecisionsCount(0);
+    setSecondsRemaining(TOTAL_MISSION_SECONDS);
+    setCurrentStage(1);
+    setPointerCleared(false);
+    setPatchDeployed(false);
+    setInvestigationCategories(new Set());
+    setGameState('PLAYING');
+
+    await GameService.registerAgent(newAgent);
   };
 
-  const handleToggleAutopilot = () => {
-    sfx.keyClick();
-    GameService.updateEventState({ autopilot: !eventState.autopilot });
-  };
-
-  const handleTriggerAttackWave = () => {
-    sfx.glitch();
-    sfx.warn();
-    GameService.updateEventState({
-      threatLevel: 5,
-      sharedServerHealth: Math.max(10, eventState.sharedServerHealth - 20),
-      exposedSitesCount: eventState.exposedSitesCount + 85000,
-      activeAlarm: true
-    });
-  };
-
-  const handleTriggerPowerFlicker = () => {
-    sfx.glitch();
-    GameService.updateEventState({ powerFlicker: true });
-    setTimeout(() => {
-      GameService.updateEventState({ powerFlicker: false });
-    }, 1500);
-  };
-
-  const handleEndIncident = () => {
-    initAudio();
-    stopSiren();
-    stopHeartbeat();
-    sfx.chime();
-    startHum();
-    const now = getServerNow();
-    const effectiveScale = eventState.timeScale || timeScale || 1;
-    GameService.updateEventState({
-      roundStartAt: now - (TOTAL_ROUND_SECONDS / effectiveScale * 1000),
-      status: 'CONCLUDED',
-      currentStation: 5,
-      activeAlarm: false
-    });
-  };
-
-  const handleResetEvent = async () => {
-    sfx.keyClick();
+  // Timeout handler
+  const handleMissionTimeout = () => {
     stopAll();
-    await GameService.resetEvent();
-  };
-
-  const handleToggleRegistration = () => {
-    sfx.keyClick();
-    GameService.updateEventState({ registrationOpen: !eventState.registrationOpen });
-  };
-
-  const handleKickAgent = async (agentId: string) => {
     sfx.error();
-    await GameService.deleteAgent(agentId);
+    setMissionOutcome('TIMEOUT');
+    setGameState('CONCLUDED');
+    finalizeAgentScore(score, 'TIMEOUT');
   };
 
-  const handleTriggerRandomEvent = () => {
-    if (Math.random() > 0.5) {
-      handleTriggerAttackWave();
+  // Finalize & submit score to cloud leaderboard
+  const finalizeAgentScore = async (finalScore: number, outcome: 'SECURED' | 'TIMEOUT') => {
+    if (!currentAgent) return;
+    const timeSpent = TOTAL_MISSION_SECONDS - secondsRemaining;
+    const updated: Partial<Agent> = {
+      score: Math.max(0, finalScore),
+      lastActive: Date.now()
+    };
+    await GameService.updateAgent(currentAgent.id, updated);
+  };
+
+  // Investigation commands score (+10 pts per category, awarded only once)
+  const handleInvestigationCommand = (category: string, points: number) => {
+    if (investigationCategories.has(category)) return;
+
+    setInvestigationCategories((prev) => new Set([...prev, category]));
+    setScore((s) => {
+      const next = s + points;
+      if (currentAgent) GameService.updateAgent(currentAgent.id, { score: next });
+      return next;
+    });
+  };
+
+  // Stage decision handler (+100 for correct, -20 pts and -10s for incorrect)
+  const handleDecisionOutcome = (isCorrect: boolean, pts: number, penaltySec = 0) => {
+    setTotalDecisionsCount((c) => c + 1);
+    if (isCorrect) {
+      setCorrectDecisionsCount((c) => c + 1);
+    } else if (penaltySec > 0) {
+      setSecondsRemaining((s) => Math.max(5, s - penaltySec));
+    }
+
+    setScore((s) => {
+      const next = Math.max(0, s + pts);
+      if (currentAgent) GameService.updateAgent(currentAgent.id, { score: next });
+      return next;
+    });
+  };
+
+  // Clear pointer interactive action in Stage 2
+  const handleClearPointer = () => {
+    if (pointerCleared) return;
+    setPointerCleared(true);
+    setScore((s) => {
+      const next = s + 100;
+      if (currentAgent) GameService.updateAgent(currentAgent.id, { score: next });
+      return next;
+    });
+    sfx.unlock();
+  };
+
+  // Deploy patch in Stage 3
+  const handleDeployPatch = () => {
+    setPatchDeployed(true);
+    setScore((s) => {
+      const next = s + 100;
+      if (currentAgent) GameService.updateAgent(currentAgent.id, { score: next });
+      return next;
+    });
+  };
+
+  // Advance stage
+  const handleAdvanceStage = () => {
+    sfx.tick();
+    if (currentStage < 4) {
+      setCurrentStage((s) => s + 1);
     } else {
-      handleTriggerPowerFlicker();
+      // Completed Stage 4 -> VICTORY!
+      stopAll();
+      sfx.chime();
+      startHum();
+      const timeBonus = Math.floor(secondsRemaining * 1.5);
+      const finalScore = score + 150 + timeBonus;
+      setScore(finalScore);
+      setMissionOutcome('SECURED');
+      setGameState('CONCLUDED');
+      finalizeAgentScore(finalScore, 'SECURED');
     }
   };
 
-  const handleToggleMute = () => {
-    const next = !mutedState;
-    setMuted(next);
-    setMutedState(next);
+  // Play Again handler
+  const handlePlayAgain = () => {
+    stopAll();
+    sfx.keyClick();
+    setGameState('LOBBY');
   };
 
-  const handlePurgeHeap = () => {
-    sfx.unlock();
-    const newHealth = Math.min(100, (eventState.sharedServerHealth || 50) + 2);
-    GameService.updateEventState({ sharedServerHealth: newHealth });
+  // Audio mute toggle
+  const handleToggleMute = () => {
+    const next = !isMuted();
+    setMuted(next);
+    setIsAudioMuted(next);
   };
+
+  // Format time mm:ss
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Threat level calculation based on time remaining
+  const threatLevel = secondsRemaining <= 30 ? 5 : secondsRemaining <= 70 ? 4 : secondsRemaining <= 120 ? 3 : 2;
 
   return (
-    <div className="min-h-screen bg-[#04070f] text-slate-100 flex flex-col font-cairo">
+    <div className={`min-h-screen w-full bg-[#04070f] text-[#e8eefc] flex flex-col font-cairo select-none ${secondsRemaining <= 30 && gameState === 'PLAYING' ? 'vig' : ''}`}>
       
-      {/* Discreet LOCAL DEV MODE Switcher (Only visible in agent view for local testing) */}
-      {!isHostMode && (
-        <div className="fixed bottom-2 left-2 z-50 flex items-center gap-1.5 p-1 rounded-lg bg-black/80 border border-slate-800 text-[10px] font-mono backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-lg">
-          <span className="text-slate-400 px-1 font-bold">LOCAL DEV MODE:</span>
-          <button
-            onClick={() => {
-              window.history.replaceState(null, '', '?screen=host');
-              window.location.reload();
-            }}
-            className="px-2 py-0.5 rounded transition cursor-pointer text-slate-400 hover:text-white"
-          >
-            HOST SCREEN
-          </button>
+      {/* 1. LOBBY / REGISTRATION SCREEN */}
+      {gameState === 'LOBBY' && (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-2xl pn border border-[#4285F4]/40 bg-[#070d1f]/95 shadow-[0_0_35px_rgba(66,133,244,0.2)] text-center space-y-4">
+            
+            {/* Header Branding */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-center gap-2">
+                <svg width="42" height="26" viewBox="0 0 46 28" fill="none" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 3 4 14" stroke="#4285F4" />
+                  <path d="M4 14 15 25" stroke="#34A853" />
+                  <path d="M31 3 42 14" stroke="#EA4335" />
+                  <path d="M42 14 31 25" stroke="#FBBC05" />
+                </svg>
+                <h1 className="mono font-black text-2xl tracking-wider text-white ltr">503: OVERLOAD</h1>
+              </div>
+              <p className="text-xs font-mono font-bold text-[#8fa6d6]">
+                "180 Seconds. Two Vulnerabilities. One Mission."
+              </p>
+            </div>
+
+            {/* Incident Alert Brief */}
+            <div className="p-3 rounded-xl bg-[#2a0d12]/70 border border-[#EA4335]/60 text-right space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-[#ff8a80]">
+                <span>🚨 أزمة تشغيلية طارئة</span>
+                <span>PHP 8.3 WORKER OOM</span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed font-semibold">
+                تم رصد انهيار مفاجئ في خوادم المعالجة، وخلل في مجمع الذاكرة يهدد باختراق الموقع. مهمتك هي قيادة الاستجابة، التحقيق في السجلات والتيرمينال، واحتواء الثغرات قبل نفاد الـ 180 ثانية!
+              </p>
+            </div>
+
+            {/* Input Form */}
+            <form onSubmit={handleStartMission} className="space-y-3 pt-1 text-right">
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">
+                  اسم العميل (Callsign):
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  placeholder="مثال: Tariq_Cyber, Sarah_Sec"
+                  className="w-full h-11 px-3 rounded-xl bg-[#040817] border border-slate-700 text-white font-mono text-sm focus:outline-none focus:border-[#4285F4]"
+                />
+              </div>
+
+              {/* Squad Selection */}
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">
+                  اختر كتيبتك / مسارك:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['sentinels', 'neural', 'vault'] as Squad[]).map((sq) => {
+                    const meta = SQUADS[sq];
+                    const isSelected = selectedSquad === sq;
+                    return (
+                      <button
+                        key={sq}
+                        type="button"
+                        onClick={() => setSelectedSquad(sq)}
+                        className={`p-2 rounded-xl border text-center transition cursor-pointer flex flex-col items-center gap-1 ${
+                          isSelected
+                            ? 'border-[#4285F4] bg-[#0c1a40] text-white shadow-md'
+                            : 'border-slate-800 bg-[#060c1d] text-slate-400 hover:border-slate-600'
+                        }`}
+                      >
+                        <span className="text-base">{meta.badge}</span>
+                        <span className="font-mono text-[11px] font-bold"><bdi dir="ltr">{meta.name}</bdi></span>
+                        <span className="text-[9px] text-slate-400 font-cairo">{meta.track}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Start Button */}
+              <button
+                type="submit"
+                className="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-red-600 via-amber-600 to-red-600 text-white font-black text-sm tracking-wider shadow-[0_0_25px_rgba(234,67,53,0.6)] active:scale-95 hover:brightness-110 transition cursor-pointer flex items-center justify-center gap-2 animate-pulse mt-2"
+              >
+                <Zap size={18} />
+                <span>بدء مهمة الاستجابة للحادث (180 ثانية)</span>
+              </button>
+            </form>
+
+            <div className="text-[11px] text-slate-400 font-mono pt-1">
+              Google DGoC | TU · Be Googley
+            </div>
+          </div>
         </div>
       )}
 
-      {/* VIEWPORT ROUTING */}
-      {isHostMode ? (
-        eventState.currentStation === 5 || eventState.status === 'CONCLUDED' ? (
-          <HallOfDefenders
-            agents={agents}
-            isHost={true}
-            onReset={handleResetEvent}
-          />
-        ) : (
-          <HostScreen
-            eventState={eventState}
-            agents={agents}
-            killFeed={killFeed}
-            lobbyRemaining={lobbyRemaining}
-            onStartNow={handleStartNow}
-            onPauseResume={handlePauseResume}
-            onSkipStation={handleSkipStation}
-            onToggleAutopilot={handleToggleAutopilot}
-            onTriggerAttackWave={handleTriggerAttackWave}
-            onTriggerPowerFlicker={handleTriggerPowerFlicker}
-            onEndIncident={handleEndIncident}
-            onResetEvent={handleResetEvent}
-            onToggleRegistration={handleToggleRegistration}
-            onKickAgent={handleKickAgent}
-            onTriggerRandomEvent={handleTriggerRandomEvent}
-            isMuted={mutedState}
-            onToggleMute={handleToggleMute}
-          />
-        )
-      ) : (
-        !currentAgent ? (
-          <AgentJoinView
-            onRegister={handleRegisterAgent}
-            agents={agents}
-            isSubmitting={registerSubmitting}
-            errorMessage={registerError}
-          />
-        ) : eventState.currentStation === 5 || eventState.status === 'CONCLUDED' ? (
-          <HallOfDefenders
-            agents={agents}
+      {/* 2. PLAYING OPERATIONS ROOM (Desktop & Mobile) */}
+      {gameState === 'PLAYING' && (
+        <div className="flex-1 flex flex-col gap-2 p-2 sm:p-3 max-w-[1440px] w-full mx-auto">
+          
+          {/* TOP HUD BAR (Matches Approved Reference) */}
+          <header className="pn h-[60px] px-3 sm:px-5 flex items-center justify-between shrink-0 rounded-2xl border border-[#4285F4]/35 bg-[#0a1228]/90">
+            {/* Logo */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <svg width="38" height="24" viewBox="0 0 46 28" fill="none" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 3 4 14" stroke="#4285F4" />
+                <path d="M4 14 15 25" stroke="#34A853" />
+                <path d="M31 3 42 14" stroke="#EA4335" />
+                <path d="M42 14 31 25" stroke="#FBBC05" />
+              </svg>
+              <div className="leading-tight">
+                <div className="mono font-black text-base sm:text-lg text-white ltr">503: OVERLOAD</div>
+                <div className="text-[10px] text-[#8fa6d6] font-bold hidden sm:block">Google DGoC | TU · Incident Response</div>
+              </div>
+            </div>
+
+            {/* Countdown Timer */}
+            <div className="flex items-center gap-2">
+              <span className="mono text-[10px] sm:text-xs font-black text-[#ff8a80] tracking-wider hidden sm:inline">OVERLOAD IN</span>
+              <span className={`mono font-black text-2xl sm:text-3xl leading-none text-[#EA4335] text-shadow-red ${secondsRemaining <= 30 ? 'pulse' : ''}`}>
+                {formatTime(secondsRemaining)}
+              </span>
+            </div>
+
+            {/* Threat Level + Score + Audio Mute */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Threat Bars */}
+              <div className="text-center hidden sm:block">
+                <div className="mono text-[9px] text-[#8fa6d6] font-bold tracking-wider">THREAT LEVEL</div>
+                <div className="flex gap-1 mt-1">
+                  <i className={`w-3.5 h-2 rounded-xs ${threatLevel >= 1 ? 'bg-[#34A853]' : 'bg-slate-800'}`} />
+                  <i className={`w-3.5 h-2 rounded-xs ${threatLevel >= 2 ? 'bg-[#FBBC05]' : 'bg-slate-800'}`} />
+                  <i className={`w-3.5 h-2 rounded-xs ${threatLevel >= 3 ? 'bg-[#FBBC05]' : 'bg-slate-800'}`} />
+                  <i className={`w-3.5 h-2 rounded-xs ${threatLevel >= 4 ? 'bg-[#EA4335]' : 'bg-slate-800'}`} />
+                  <i className={`w-3.5 h-2 rounded-xs ${threatLevel >= 5 ? 'bg-[#EA4335] blink' : 'bg-slate-800'}`} />
+                </div>
+              </div>
+
+              {/* Score Badge */}
+              <div className="px-2.5 py-1 rounded-xl bg-[#0b1430] border border-[#2b3a66] mono font-black text-xs sm:text-sm text-white">
+                {score} PTS
+              </div>
+
+              {/* Audio Toggle */}
+              <button
+                onClick={handleToggleMute}
+                className="p-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white cursor-pointer"
+                title={isAudioMuted ? 'تفعيل الصوت' : 'كتم الصوت'}
+              >
+                {isAudioMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+              </button>
+            </div>
+          </header>
+
+          {/* HAZARD ALARM STRIP */}
+          <div className="haz h-9 rounded-xl flex items-center justify-center shrink-0">
+            <div className="bg-[#150608] px-3 sm:px-5 py-1 rounded-lg flex items-center gap-2 sm:gap-3 font-black text-xs sm:text-sm text-[#ff6b5e] border border-[#EA4335]">
+              <AlertTriangle size={15} />
+              <span className="mono blink tracking-wider">BREACH ACTIVE</span>
+              <span>
+                {currentStage === 1 && 'المرحلة 1 · استنزاف الذاكرة وانهيار المعالجة (OOM Fatal)'}
+                {currentStage === 2 && 'المرحلة 2 · مؤشر معلّق يشير لذاكرة محرّرة (Use-After-Free)'}
+                {currentStage === 3 && 'المرحلة 3 · نشر وترقيع النواة بحزمة الأمان (Patch Lab)'}
+                {currentStage === 4 && 'المرحلة 4 · الإغلاق الأمني التام ومطابقة الثغرات (Lockdown)'}
+              </span>
+              <span className="mono text-[#FBBC05] hidden sm:inline">
+                {currentStage === 1 ? 'CVE-2026-109618' : 'CVE-2026-109619'}
+              </span>
+            </div>
+          </div>
+
+          {/* MOBILE NAVIGATION TABS (Visible only on small screens) */}
+          <div className="flex sm:hidden items-center gap-1 p-1 rounded-xl bg-[#070e24] border border-slate-800 shrink-0 text-xs font-bold">
+            <button
+              onClick={() => setActiveMobileTab('memory')}
+              className={`flex-1 py-1.5 rounded-lg transition ${activeMobileTab === 'memory' ? 'bg-[#EA4335] text-white shadow' : 'text-slate-400'}`}
+            >
+              🧠 فحص الذاكرة
+            </button>
+            <button
+              onClick={() => setActiveMobileTab('terminal')}
+              className={`flex-1 py-1.5 rounded-lg transition ${activeMobileTab === 'terminal' ? 'bg-[#34A853] text-white shadow' : 'text-slate-400'}`}
+            >
+              💻 التيرمينال
+            </button>
+            <button
+              onClick={() => setActiveMobileTab('decisions')}
+              className={`flex-1 py-1.5 rounded-lg transition ${activeMobileTab === 'decisions' ? 'bg-[#4285F4] text-white shadow' : 'text-slate-400'}`}
+            >
+              🛡️ القرار الأمني
+            </button>
+          </div>
+
+          {/* MAIN GRID: DESKTOP 3-COLUMNS / MOBILE TABBED */}
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
+            
+            {/* LEFT COLUMN: Mission Stages & Server Rack (Desktop Only: 3 cols) */}
+            <div className="hidden lg:flex lg:col-span-3 flex-col gap-2.5">
+              
+              {/* 4 Station Progress Cards */}
+              <div className="pn p-3 rounded-2xl border border-slate-800 space-y-2">
+                <span className="text-[11px] font-mono font-bold text-slate-400 block pb-1 border-b border-slate-800">
+                  INCIDENT TIMELINE
+                </span>
+
+                {/* Stage 1 */}
+                <div className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${currentStage === 1 ? 'border-[#EA4335] bg-[#2a0d12]/70 pulse' : currentStage > 1 ? 'border-emerald-500/50 bg-emerald-950/30' : 'border-slate-800 opacity-50'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-mono font-bold text-xs ${currentStage > 1 ? 'bg-emerald-500 text-black' : currentStage === 1 ? 'bg-[#EA4335] text-white' : 'bg-slate-800 text-slate-400'}`}>
+                    {currentStage > 1 ? '✓' : '1'}
+                  </span>
+                  <div>
+                    <div className="mono font-bold text-xs">1 · MEMORY VAULT</div>
+                    <div className="text-[10px] text-slate-400">OOM Fatal Exhaustion</div>
+                  </div>
+                </div>
+
+                {/* Stage 2 */}
+                <div className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${currentStage === 2 ? 'border-[#EA4335] bg-[#2a0d12]/70 pulse' : currentStage > 2 ? 'border-emerald-500/50 bg-emerald-950/30' : 'border-slate-800 opacity-50'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-mono font-bold text-xs ${currentStage > 2 ? 'bg-emerald-500 text-black' : currentStage === 2 ? 'bg-[#EA4335] text-white' : 'bg-slate-800 text-slate-400'}`}>
+                    {currentStage > 2 ? '✓' : '2'}
+                  </span>
+                  <div>
+                    <div className="mono font-bold text-xs">2 · DANGLING CORRIDOR</div>
+                    <div className="text-[10px] text-slate-400">Use-After-Free Stale Ptr</div>
+                  </div>
+                </div>
+
+                {/* Stage 3 */}
+                <div className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${currentStage === 3 ? 'border-[#4285F4] bg-[#0c1a40]/70 pulse' : currentStage > 3 ? 'border-emerald-500/50 bg-emerald-950/30' : 'border-slate-800 opacity-50'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-mono font-bold text-xs ${currentStage > 3 ? 'bg-emerald-500 text-black' : currentStage === 3 ? 'bg-[#4285F4] text-white' : 'bg-slate-800 text-slate-400'}`}>
+                    {currentStage > 3 ? '✓' : '3'}
+                  </span>
+                  <div>
+                    <div className="mono font-bold text-xs">3 · PATCH LAB</div>
+                    <div className="text-[10px] text-slate-400">Vendor CVE Remediation</div>
+                  </div>
+                </div>
+
+                {/* Stage 4 */}
+                <div className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${currentStage === 4 ? 'border-[#FBBC05] bg-[#2b2406]/70 pulse' : 'border-slate-800 opacity-50'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-mono font-bold text-xs ${currentStage === 4 ? 'bg-[#FBBC05] text-black' : 'bg-slate-800 text-slate-400'}`}>
+                    4
+                  </span>
+                  <div>
+                    <div className="mono font-bold text-xs">4 · FINAL LOCKDOWN</div>
+                    <div className="text-[10px] text-slate-400">CVE Classification</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Server Room Rack */}
+              <div className="pn flex-1 p-3 rounded-2xl border border-slate-800 flex flex-col gap-2">
+                <span className="mono text-[10px] font-bold text-[#8fa6d6] tracking-wider">SERVER RACK · LIVE</span>
+                <div className="flex-1 flex gap-2 justify-center items-stretch ltr">
+                  {[1, 2, 3, 4, 5].map((rack) => (
+                    <div key={rack} className="w-8 rounded-lg bg-[#0b1430] border border-slate-800 flex justify-center py-2">
+                      <div className={`led ${rack === 3 ? 'blink bg-red-500' : rack === 2 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: '5px', borderRadius: '2px' }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+
+            {/* CENTER COLUMN: Memory Visualizer & Stage Decisions (Desktop: 5 cols, Mobile: active tab) */}
+            <div className={`lg:col-span-5 flex-col gap-3 ${activeMobileTab !== 'terminal' ? 'flex' : 'hidden lg:flex'}`}>
+              
+              {/* Memory Visualizer (Shown if on memory tab or desktop) */}
+              <div className={activeMobileTab === 'decisions' ? 'hidden sm:block' : 'block'}>
+                <MemoryVisualizer
+                  stage={currentStage}
+                  pointerCleared={pointerCleared}
+                  onClearPointer={handleClearPointer}
+                />
+              </div>
+
+              {/* Stage Decisions (Shown if on decisions tab or desktop) */}
+              <div className={activeMobileTab === 'memory' ? 'hidden sm:block' : 'block'}>
+                <StageDecisions
+                  currentStage={currentStage}
+                  onDecisionOutcome={handleDecisionOutcome}
+                  onAdvanceStage={handleAdvanceStage}
+                  patchDeployed={patchDeployed}
+                  onDeployPatch={handleDeployPatch}
+                />
+              </div>
+
+            </div>
+
+            {/* RIGHT COLUMN: Interactive Terminal (Desktop: 4 cols, Mobile: active tab) */}
+            <div className={`lg:col-span-4 flex-col min-h-[300px] ${activeMobileTab === 'terminal' ? 'flex' : 'hidden lg:flex'}`}>
+              <InteractiveTerminal
+                currentStage={currentStage}
+                onInvestigationCommand={handleInvestigationCommand}
+                patchDeployed={patchDeployed}
+                onDeployPatch={handleDeployPatch}
+              />
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* 3. CONCLUDED / LEADERBOARD SCREEN */}
+      {gameState === 'CONCLUDED' && currentAgent && (
+        <div className="flex-1 flex items-center justify-center p-3">
+          <LeaderboardView
+            agents={agentsList}
             currentAgent={currentAgent}
-            isHost={false}
+            missionOutcome={missionOutcome}
+            timeElapsed={TOTAL_MISSION_SECONDS - secondsRemaining}
+            accuracy={totalDecisionsCount > 0 ? Math.round((correctDecisionsCount / totalDecisionsCount) * 100) : 100}
+            onPlayAgain={handlePlayAgain}
           />
-        ) : (
-          <AgentPhoneView
-            agent={currentAgent}
-            eventState={eventState}
-            allAgents={agents}
-            onUpdateScore={handleUpdateScore}
-            onUpdateCombo={handleUpdateCombo}
-            onBetSubmitted={handleBetSubmitted}
-            onSquadNodeAction={handleSquadNodeAction}
-            onDoorCodeUnlocked={handleDoorCodeUnlocked}
-            onStartIncidentNow={handleStartNow}
-            onPurgeHeap={handlePurgeHeap}
-          />
-        )
+        </div>
       )}
 
     </div>
   );
-}
+};
 
 export default App;
+
