@@ -501,6 +501,12 @@ export function App() {
     setMutedState(next);
   };
 
+  const handlePurgeHeap = () => {
+    sfx.unlock();
+    const newHealth = Math.min(100, (eventState.sharedServerHealth || 50) + 2);
+    GameService.updateEventState({ sharedServerHealth: newHealth });
+  };
+
   return (
     <div className="min-h-screen bg-[#04070f] text-slate-100 flex flex-col font-cairo">
       
@@ -573,6 +579,8 @@ export function App() {
             onBetSubmitted={handleBetSubmitted}
             onSquadNodeAction={handleSquadNodeAction}
             onDoorCodeUnlocked={handleDoorCodeUnlocked}
+            onStartIncidentNow={handleStartNow}
+            onPurgeHeap={handlePurgeHeap}
           />
         )
       )}
