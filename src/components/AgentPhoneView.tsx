@@ -281,46 +281,46 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
         </div>
       ))}
 
-      {/* Main Container - max-w-[440px] for phones */}
-      <div className="w-full max-w-[440px] flex-1 flex flex-col justify-between z-10 gap-2.5">
+      {/* Main Container - max-w-[420px] for phones */}
+      <div className="w-full max-w-[420px] flex-1 flex flex-col justify-between z-10 gap-2 pb-2">
 
         {/* 1. TOP HUD BAR: Identity + Live Points + Streak */}
-        <header className="w-full rounded-2xl bg-[#070e24]/95 border border-[#4285F4]/30 p-3 shadow-[0_0_20px_rgba(66,133,244,0.15)] shrink-0">
+        <header className="w-full rounded-xl bg-[#070e24]/95 border border-[#4285F4]/30 p-2.5 shadow-[0_0_15px_rgba(66,133,244,0.15)] shrink-0">
           <div className="flex items-center justify-between gap-2">
             
             {/* Identity & Squad */}
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full shrink-0 shadow-[0_0_10px_currentColor]" style={{ backgroundColor: squadMeta.color, color: squadMeta.color }} />
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: squadMeta.color }} />
               <div className="text-right">
-                <span className="font-black text-sm text-white block leading-tight">
+                <span className="font-black text-xs text-white block leading-tight">
                   {agent.displayName}
                 </span>
-                <span className="text-[11px] font-mono font-bold" style={{ color: squadMeta.color }}>
+                <span className="text-[10px] font-mono font-bold" style={{ color: squadMeta.color }}>
                   <bdi dir="ltr">{squadMeta.name} · {squadMeta.track}</bdi>
                 </span>
               </div>
             </div>
 
             {/* Live Score + Streak */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {(agent.combo || 1) > 1 && (
-                <div className="px-2 py-0.5 rounded-lg bg-red-950/80 border border-red-500/60 flex items-center gap-1 animate-pulse">
-                  <Flame size={14} className="text-red-400" />
-                  <span className="text-xs font-mono font-black text-red-300">x{agent.combo}</span>
+                <div className="px-1.5 py-0.5 rounded-md bg-red-950/80 border border-red-500/60 flex items-center gap-0.5 animate-pulse">
+                  <Flame size={12} className="text-red-400" />
+                  <span className="text-[11px] font-mono font-black text-red-300">x{agent.combo}</span>
                 </div>
               )}
-              <div className="px-3 py-1 rounded-xl bg-[#0c1a40] border border-[#4285F4]/50 text-right">
-                <span className="text-[10px] font-mono text-slate-400 block leading-none">نقاط الدفاع</span>
-                <span className="text-base font-mono font-black text-white">{agent.score || 0}</span>
+              <div className="px-2.5 py-0.5 rounded-lg bg-[#0c1a40] border border-[#4285F4]/50 text-right">
+                <span className="text-[9px] font-mono text-slate-400 block leading-none">النقاط</span>
+                <span className="text-sm font-mono font-black text-white">{agent.score || 0}</span>
               </div>
             </div>
 
           </div>
 
           {/* Server Health Bar */}
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-            <span className="font-mono text-[10px] text-slate-400">صحة السيرفر المشتركة</span>
-            <div className="flex-1 mx-2 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+          <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="font-mono text-[9px] text-slate-400">صحة السيرفر</span>
+            <div className="flex-1 mx-2 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
                   eventState.sharedServerHealth > 50 ? 'bg-[#34A853]' : eventState.sharedServerHealth > 25 ? 'bg-[#FBBC05]' : 'bg-[#EA4335]'
@@ -328,36 +328,33 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
                 style={{ width: `${Math.max(5, eventState.sharedServerHealth || 100)}%` }}
               />
             </div>
-            <span className="font-mono text-xs font-bold text-white">{eventState.sharedServerHealth || 100}%</span>
+            <span className="font-mono text-[10px] font-bold text-white">{eventState.sharedServerHealth || 100}%</span>
           </div>
         </header>
 
         {/* 2. MAIN ACTIVE GAMEPLAY CONTENT */}
-        <main className="w-full flex-1 flex flex-col justify-between gap-3 min-h-0">
+        <main className="w-full flex-1 flex flex-col justify-between gap-2 min-h-0">
 
           {/* LOBBY PHASE: INTERACTIVE WARMUP GAME */}
           {isLobby && (
-            <div className="p-3.5 rounded-2xl bg-[#070e24]/90 border border-blue-500/30 text-center space-y-3">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs font-mono">
-                <Sparkles size={13} className="text-emerald-400 animate-spin" />
-                <span>تدريب ردود الأفعال • WARMUP COMBAT</span>
+            <div className="p-2.5 rounded-xl bg-[#070e24]/90 border border-blue-500/30 text-center space-y-1.5 shrink-0">
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono">
+                <Sparkles size={11} className="text-emerald-400 animate-spin" />
+                <span>تدريب سريع • WARMUP COMBAT</span>
               </div>
 
-              <div className="space-y-0.5">
-                <h2 className="text-base font-black text-white">المس التهديدات قبل انطلاق الحادث الأمني!</h2>
-                <p className="text-xs text-slate-300">
-                  انقر على الباكتات الحمراء لرفع رصيدك وتدريب سرعة استجابتك.
-                </p>
-              </div>
+              <p className="text-[11px] text-slate-300 leading-tight">
+                المس التهديدات الحمراء بالأسفل لرفع رصيدك قبل بدء الهجوم.
+              </p>
 
               {/* Instant Start Override Button */}
               {onStartIncidentNow && (
                 <button
                   onClick={onStartIncidentNow}
-                  className="w-full min-h-[46px] rounded-xl bg-gradient-to-r from-red-600 via-amber-600 to-red-600 text-white font-black text-sm shadow-[0_0_20px_rgba(234,67,53,0.5)] active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full min-h-[38px] rounded-lg bg-gradient-to-r from-red-600 via-amber-600 to-red-600 text-white font-black text-xs shadow-md active:scale-95 transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <Zap size={18} />
-                  <span>⚡ إطلاق صافرة الإنذار وبدء الهجوم الآن!</span>
+                  <Zap size={15} />
+                  <span>⚡ إطلاق صافرة الإنذار وبدء الهجوم فوراً!</span>
                 </button>
               )}
             </div>
@@ -420,35 +417,35 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
           )}
 
           {/* INTERACTIVE THREAT STREAM (Always Active for All Players!) */}
-          <div className="flex-1 rounded-2xl bg-[#02050f] border border-slate-800 p-2.5 flex flex-col justify-end gap-2 min-h-[220px]">
-            <div className="flex items-center justify-between px-1 text-[11px] font-mono text-slate-400">
-              <span>⚠️ المس الهجمات الحمراء فقط:</span>
-              <span className="text-amber-400 font-bold">نقاط مضاعفة مع الكومبو 🔥</span>
+          <div className="rounded-xl bg-[#02050f] border border-slate-800 p-2 flex flex-col gap-1.5 shrink-0">
+            <div className="flex items-center justify-between px-1 text-[10px] font-mono text-slate-400">
+              <span>⚠️ المس الهجمات الحمراء:</span>
+              <span className="text-amber-400 font-bold">مضاعفة النقاط مع الكومبو 🔥</span>
             </div>
 
-            {activeThreats.map((threat) => (
+            {activeThreats.slice(0, 3).map((threat) => (
               <button
                 key={threat.id}
                 onClick={(e) => handleThreatClick(threat, e)}
-                className={`w-full min-h-[50px] p-2.5 rounded-xl border text-right font-mono text-xs flex items-center justify-between active:scale-95 transition cursor-pointer shadow-md ${
+                className={`w-full min-h-[42px] px-2.5 py-1.5 rounded-lg border text-right font-mono text-xs flex items-center justify-between active:scale-95 transition cursor-pointer shadow-sm ${
                   threat.isMalicious
-                    ? 'border-red-500/80 bg-red-950/50 text-red-100 shadow-[0_0_15px_rgba(234,67,53,0.3)] animate-pulse'
+                    ? 'border-red-500/80 bg-red-950/60 text-red-100 shadow-[0_0_10px_rgba(234,67,53,0.3)] animate-pulse'
                     : 'border-slate-700 bg-slate-900/60 text-slate-300 opacity-80'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-cairo font-bold ${threat.isMalicious ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className={`text-[9px] px-1 py-0.5 rounded font-cairo font-bold ${threat.isMalicious ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
                     {threat.isMalicious ? 'هجوم ⚠️' : 'سليم ✅'}
                   </span>
                   {threat.cveTag && (
-                    <span className="text-[10px] text-amber-300 border border-amber-500/40 px-1 rounded">
+                    <span className="text-[9px] text-amber-300 border border-amber-500/40 px-1 rounded">
                       {threat.cveTag}
                     </span>
                   )}
                 </div>
-                <div className="text-left truncate mr-2">
-                  <span className="font-bold block truncate text-xs"><bdi dir="ltr">{threat.title}</bdi></span>
-                  <span className="text-[10px] text-slate-400 block truncate">{threat.subtitle}</span>
+                <div className="text-left truncate mr-2 flex-1">
+                  <span className="font-bold block truncate text-[11px]"><bdi dir="ltr">{threat.title}</bdi></span>
+                  <span className="text-[9px] text-slate-400 block truncate">{threat.subtitle}</span>
                 </div>
               </button>
             ))}
@@ -457,30 +454,30 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
           {/* 🚨 THE EMERGENCY PURGE BUTTON (Interactive Room Cooperation) */}
           <button
             onClick={handlePurge}
-            className="w-full min-h-[52px] rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 text-white font-black text-sm active:scale-95 shadow-[0_0_25px_rgba(234,67,53,0.6)] border border-red-400 transition cursor-pointer flex items-center justify-center gap-2 animate-pulse"
+            className="w-full min-h-[44px] rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 text-white font-black text-xs active:scale-95 shadow-[0_0_20px_rgba(234,67,53,0.5)] border border-red-400 transition cursor-pointer flex items-center justify-center gap-2 shrink-0 animate-pulse"
           >
-            <Shield size={20} className="animate-bounce" />
+            <Shield size={16} />
             <span>🚨 تطهير الذاكرة السريع • PURGE HEAP (+15 PTS)</span>
           </button>
 
           {/* 🔐 DOOR CODE AIRLOCK KEYPAD (Always Accessible on Screen) */}
-          <div className="p-3 rounded-2xl bg-[#070e24] border border-[#FBBC05]/40 text-center space-y-2">
-            <div className="flex items-center justify-between text-xs font-mono">
+          <div className="p-2.5 rounded-xl bg-[#070e24] border border-[#FBBC05]/40 text-center space-y-1.5 shrink-0">
+            <div className="flex items-center justify-between text-[11px] font-mono">
               <span className="text-amber-300 font-bold flex items-center gap-1">
-                <Lock size={12} />
+                <Lock size={11} />
                 <span>رمز الباب من الشاشة الكبيرة:</span>
               </span>
               <span className="text-slate-400">4 أرقام (+100 PTS)</span>
             </div>
 
             {/* Input Display */}
-            <div className="flex items-center justify-center gap-2 font-mono dir-ltr py-0.5">
+            <div className="flex items-center justify-center gap-2 font-mono dir-ltr">
               {[0, 1, 2, 3].map((idx) => (
                 <div
                   key={idx}
-                  className={`w-11 h-12 rounded-xl border flex items-center justify-center text-xl font-black transition-all ${
+                  className={`w-9 h-10 rounded-lg border flex items-center justify-center text-lg font-black transition-all ${
                     doorCodeSuccess
-                      ? 'border-emerald-500 bg-emerald-950/60 text-emerald-400 shadow-[0_0_15px_#34A853]'
+                      ? 'border-emerald-500 bg-emerald-950/60 text-emerald-400 shadow-[0_0_12px_#34A853]'
                       : doorCodeError
                       ? 'border-red-500 bg-red-950/60 text-red-400 animate-shake'
                       : 'border-slate-700 bg-slate-900/90 text-white'
@@ -491,15 +488,15 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
               ))}
             </div>
 
-            {/* Keypad Grid (Min 48px touch targets) */}
-            <div className="grid grid-cols-3 gap-1.5 max-w-[280px] mx-auto font-mono text-sm">
+            {/* Keypad Grid (Touch Targets 38px) */}
+            <div className="grid grid-cols-3 gap-1 max-w-[260px] mx-auto font-mono text-xs">
               {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'مسح', '0', 'تأكيد'].map((btn) => (
                 <button
                   key={btn}
                   onClick={() => handleKeypadPress(btn)}
-                  className={`min-h-[44px] rounded-xl font-bold active:scale-95 transition cursor-pointer border ${
+                  className={`min-h-[36px] rounded-lg font-bold active:scale-95 transition cursor-pointer border ${
                     btn === 'تأكيد'
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
                       : btn === 'مسح'
                       ? 'bg-rose-950/70 text-rose-300 border-rose-800'
                       : 'bg-slate-900/90 text-white border-slate-800 hover:bg-slate-800'
