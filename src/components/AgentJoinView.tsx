@@ -9,13 +9,15 @@ interface AgentJoinViewProps {
   agents: Agent[];
   isSubmitting: boolean;
   errorMessage: string;
+  onOpenBriefing?: () => void;
 }
 
 export const AgentJoinView: React.FC<AgentJoinViewProps> = ({
   onRegister,
   agents,
   isSubmitting,
-  errorMessage
+  errorMessage,
+  onOpenBriefing
 }) => {
   const [displayName, setDisplayName] = useState('');
   const [selectedSquad, setSelectedSquad] = useState<Squad>('sentinels');
@@ -68,11 +70,22 @@ export const AgentJoinView: React.FC<AgentJoinViewProps> = ({
         <main className="w-full my-auto py-3">
           <div className="cyber-panel w-full p-4 sm:p-5 border-[#4285F4]/40 bg-[#060c20]/95 shadow-[0_0_40px_rgba(66,133,244,0.2)]">
             
-            {/* Quick Demo Play Button */}
+            {/* Quick Demo Play & Instructions Buttons */}
             <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-blue-950/70 to-emerald-950/70 border border-emerald-500/40 text-center space-y-2">
               <div className="text-xs text-emerald-300 font-bold">
-                ⚡ هل تريد تجربة اللعبة والتحكم بالتيرمينال فوراً؟
+                ⚡ هل تريد تجربة اللعبة والتحكم بالتحديات فوراً؟
               </div>
+
+              {onOpenBriefing && (
+                <button
+                  type="button"
+                  onClick={onOpenBriefing}
+                  className="w-full py-2 px-3 rounded-lg bg-blue-900/60 hover:bg-blue-800 border border-blue-400/60 text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                >
+                  <span>📖 اضغط هنا لقراءة تعليمات اللعبة وقواعد المهمة</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={async () => {
@@ -83,7 +96,7 @@ export const AgentJoinView: React.FC<AgentJoinViewProps> = ({
                 disabled={isSubmitting}
                 className="w-full min-h-[44px] rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs shadow-[0_0_15px_rgba(52,168,83,0.4)] transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
               >
-                <span>🎮 دخول سريع وتجربة فورية (PLAY NOW)</span>
+                <span>🎮 دخول سريع وتجربة اللعبة (PLAY NOW)</span>
               </button>
             </div>
 

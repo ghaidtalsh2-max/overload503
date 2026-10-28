@@ -18,6 +18,8 @@ import { deriveTimelineState, TimelineState } from './services/timelineService';
 import { HostScreen } from './components/HostScreen';
 import { AgentJoinView } from './components/AgentJoinView';
 import { AgentPhoneView } from './components/AgentPhoneView';
+import { ArcadeGameplayView } from './components/ArcadeGameplayView';
+import { MissionBriefingModal } from './components/MissionBriefingModal';
 
 export function App() {
   const [eventState, setEventState] = useState<EventState>(INITIAL_EVENT_STATE);
@@ -43,6 +45,10 @@ export function App() {
     const p = urlParams.get('screen') || urlParams.get('view');
     return p === 'host' ? 'host' : 'agent';
   });
+
+  // Gameplay Mode: 'arcade' (visual, interactive, mini-games) vs 'terminal' (pure Linux hacker shell)
+  const [gameplayMode, setGameplayMode] = useState<'arcade' | 'terminal'>('arcade');
+  const [showBriefingModal, setShowBriefingModal] = useState<boolean>(false);
 
   const timeScale = Number(urlParams.get('timeScale') || urlParams.get('speed') || 1);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(isMuted());
@@ -199,8 +205,28 @@ export function App() {
   return (
     <div className="relative w-full min-h-screen bg-[#04070f] text-[#e8eefc] overflow-hidden">
       
+      {/* Mission Instructions Modal */}
+      <MissionBriefingModal
+        isOpen={showBriefingModal}
+        onClose={() => setShowBriefingModal(false)}
+        onStartPlaying={() => {
+          setShowBriefingModal(false);
+          if (timeline.phase === 'LOBBY') {
+            handleStartNow();
+          }
+        }}
+      />
+
       {/* View Switcher Floating Badge (For events & pairing testing) */}
       <div className="fixed bottom-2 right-2 z-50 flex items-center gap-1.5 p-1 rounded-xl bg-[#070d1f]/95 border border-slate-700 shadow-2xl text-[10px] font-mono">
+        <button
+          onClick={() => setShowBriefingModal(true)}
+          className="px-2.5 py-1 rounded-lg bg-blue-900/60 border border-blue-500/50 text-blue-300 hover:text-white transition cursor-pointer flex items-center gap-1 font-bold"
+          title="شاهد تعليمات اللعبة والمهمة"
+        >
+          📖 <span>التعليمات</span>
+        </button>
+
         <button
           onClick={() => setViewMode('agent')}
           className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
@@ -256,6 +282,19 @@ export function App() {
           agents={agents}
           isSubmitting={isSubmitting}
           errorMessage={registerError}
+          onOpenBriefing={() => setShowBriefingModal(true)}
+        />
+      ) : gameplayMode === 'arcade' ? (
+        <ArcadeGameplayView
+          agent={currentAgent}
+          timeline={timeline}
+          onUpdateScore={handleUpdateScore}
+          onDoorCodeUnlocked={() => {
+            GameService.updateAgent(currentAgent.id, { doorCodeUnlockedAt: Date.now() });
+          }}
+          onStartNow={handleStartNow}
+          onResetAgent={handleResetAgent}
+          onSwitchToTerminal={() => setGameplayMode('terminal')}
         />
       ) : (
         <AgentPhoneView
@@ -267,6 +306,7 @@ export function App() {
           }}
           onStartNow={handleStartNow}
           onResetAgent={handleResetAgent}
+          onSwitchToArcade={() => setGameplayMode('arcade')}
         />
       )}
 

@@ -36,6 +36,7 @@ interface AgentPhoneViewProps {
   onDoorCodeUnlocked: () => void;
   onStartNow?: () => void;
   onResetAgent?: () => void;
+  onSwitchToArcade?: () => void;
 }
 
 export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
@@ -44,7 +45,8 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
   onUpdateScore,
   onDoorCodeUnlocked,
   onStartNow,
-  onResetAgent
+  onResetAgent,
+  onSwitchToArcade
 }) => {
   // Engine State
   const [engineState, setEngineState] = useState<TerminalState>(createInitialTerminalState);
@@ -233,6 +235,17 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
           >
             {isMutedLocal ? <VolumeX size={15} /> : <Volume2 size={15} />}
           </button>
+          
+          {onSwitchToArcade && (
+            <button
+              onClick={onSwitchToArcade}
+              className="px-2.5 py-1 rounded-lg bg-emerald-600/30 border border-emerald-500/60 text-emerald-300 hover:bg-emerald-600/50 text-xs font-bold transition cursor-pointer flex items-center gap-1"
+              title="العودة لوضع الألعاب التفاعلي البصري"
+            >
+              <span>🎮 وضع الأركيد التفاعلي</span>
+            </button>
+          )}
+
           <div className="mono font-bold text-xs px-2 py-0.5 rounded bg-blue-950/60 border border-blue-500/40 text-blue-300">
             PTS {engineState.score}
           </div>
