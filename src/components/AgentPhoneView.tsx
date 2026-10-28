@@ -34,13 +34,17 @@ interface AgentPhoneViewProps {
   timeline: TimelineState;
   onUpdateScore: (points: number, reason: string) => void;
   onDoorCodeUnlocked: () => void;
+  onStartNow?: () => void;
+  onResetAgent?: () => void;
 }
 
 export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
   agent,
   timeline,
   onUpdateScore,
-  onDoorCodeUnlocked
+  onDoorCodeUnlocked,
+  onStartNow,
+  onResetAgent
 }) => {
   // Engine State
   const [engineState, setEngineState] = useState<TerminalState>(createInitialTerminalState);
@@ -253,6 +257,27 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
         </div>
       </header>
 
+      {/* LOBBY / PRE-INCIDENT BANNER WITH INSTANT START */}
+      {timeline.phase === 'LOBBY' && (
+        <div className="h-10 flex-none flex items-center justify-between px-3 bg-gradient-to-r from-[#071329] to-[#0a1e3f] border-b border-[#4285F4]/40 z-10 text-xs">
+          <div className="flex items-center gap-2 text-slate-200">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-bold">
+              في انتظار بدء الحادث (00:{String(Math.max(0, 45 - timeline.inPhaseSeconds)).padStart(2, '0')})
+            </span>
+          </div>
+          {onStartNow && (
+            <button
+              type="button"
+              onClick={onStartNow}
+              className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs shadow-[0_0_12px_rgba(52,168,83,0.4)] transition active:scale-95 cursor-pointer flex items-center gap-1"
+            >
+              <span>⚡ بدء الهجوم فوراً (تخطي)</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* BREACH / HAZARD BANNER */}
       {timeline.activeAlarm && (
         <div className="haz h-8 flex-none flex items-center justify-center px-2 z-10">
@@ -303,9 +328,12 @@ export const AgentPhoneView: React.FC<AgentPhoneViewProps> = ({
               else if (line.type === 'ok') color = 'text-[#7ee2a0]';
               else if (line.type === 'warn') color = 'text-[#FBBC05]';
               else if (line.type === 'err') color = 'text-[#ff6b5e] font-bold';
-              else if (line.type === 'tip') {
+              
+              const isArabic = Boolean(line.text && line.text.match(/[\u0600-\u06FF]/));
+
+              if (line.type === 'tip' || isArabic) {
                 return (
-                  <div key={line.id} className="tip rtl text-right my-1 text-xs">
+                  <div key={line.id} dir="rtl" className="tip text-right my-1 text-xs leading-relaxed">
                     {line.text}
                   </div>
                 );

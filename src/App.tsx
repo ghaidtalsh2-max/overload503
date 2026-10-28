@@ -189,27 +189,46 @@ export function App() {
     GameService.endGameNow();
   };
 
+  const handleResetAgent = () => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('overload503_agent');
+    }
+    setCurrentAgent(null);
+  };
+
   return (
     <div className="relative w-full min-h-screen bg-[#04070f] text-[#e8eefc] overflow-hidden">
       
       {/* View Switcher Floating Badge (For events & pairing testing) */}
-      <div className="fixed bottom-2 right-2 z-50 flex items-center gap-1.5 p-1 rounded-xl bg-[#070d1f]/90 border border-slate-700 shadow-lg text-[10px] font-mono">
+      <div className="fixed bottom-2 right-2 z-50 flex items-center gap-1.5 p-1 rounded-xl bg-[#070d1f]/95 border border-slate-700 shadow-2xl text-[10px] font-mono">
         <button
           onClick={() => setViewMode('agent')}
-          className={`px-2 py-1 rounded-lg transition cursor-pointer ${
-            viewMode === 'agent' ? 'bg-[#4285F4] text-white font-bold' : 'text-slate-400 hover:text-white'
+          className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+            viewMode === 'agent' ? 'bg-[#4285F4] text-white font-bold shadow-[0_0_10px_rgba(66,133,244,0.5)]' : 'text-slate-400 hover:text-white'
           }`}
+          title="شاشة اللاعب والتيرمينال (Player Terminal)"
         >
-          📱 AGENT VIEW
+          📱 <span>AGENT VIEW</span>
         </button>
         <button
           onClick={() => setViewMode('host')}
-          className={`px-2 py-1 rounded-lg transition cursor-pointer ${
-            viewMode === 'host' ? 'bg-[#4285F4] text-white font-bold' : 'text-slate-400 hover:text-white'
+          className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+            viewMode === 'host' ? 'bg-[#4285F4] text-white font-bold shadow-[0_0_10px_rgba(66,133,244,0.5)]' : 'text-slate-400 hover:text-white'
           }`}
+          title="شاشة البروجكتر والعرض الرئيسية (Host Screen)"
         >
-          🖥️ HOST SCREEN
+          🖥️ <span>HOST SCREEN</span>
         </button>
+
+        {currentAgent && viewMode === 'agent' && (
+          <button
+            onClick={handleResetAgent}
+            className="px-2 py-1 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 hover:bg-red-900/60 transition cursor-pointer ml-1"
+            title="خروج وتبديل الحساب"
+          >
+            🔄 خروج
+          </button>
+        )}
       </div>
 
       {/* RENDER VIEW ACCORDING TO VIEW MODE */}
@@ -246,6 +265,8 @@ export function App() {
           onDoorCodeUnlocked={() => {
             GameService.updateAgent(currentAgent.id, { doorCodeUnlockedAt: Date.now() });
           }}
+          onStartNow={handleStartNow}
+          onResetAgent={handleResetAgent}
         />
       )}
 

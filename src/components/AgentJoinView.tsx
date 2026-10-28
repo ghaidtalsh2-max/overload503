@@ -68,7 +68,32 @@ export const AgentJoinView: React.FC<AgentJoinViewProps> = ({
         <main className="w-full my-auto py-3">
           <div className="cyber-panel w-full p-4 sm:p-5 border-[#4285F4]/40 bg-[#060c20]/95 shadow-[0_0_40px_rgba(66,133,244,0.2)]">
             
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Quick Demo Play Button */}
+            <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-blue-950/70 to-emerald-950/70 border border-emerald-500/40 text-center space-y-2">
+              <div className="text-xs text-emerald-300 font-bold">
+                ⚡ هل تريد تجربة اللعبة والتحكم بالتيرمينال فوراً؟
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const randomNum = Math.floor(100 + Math.random() * 900);
+                  audio.playUnlockClick();
+                  await onRegister(`Hunter-${randomNum}`, selectedSquad);
+                }}
+                disabled={isSubmitting}
+                className="w-full min-h-[44px] rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs shadow-[0_0_15px_rgba(52,168,83,0.4)] transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <span>🎮 دخول سريع وتجربة فورية (PLAY NOW)</span>
+              </button>
+            </div>
+
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-slate-700"></div>
+              <span className="flex-shrink mx-3 text-slate-400 text-[10px] font-mono">أو سجّل اسمك للفعالية</span>
+              <div className="flex-grow border-t border-slate-700"></div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4 pt-2">
               
               {/* Display Name Input */}
               <div className="space-y-1.5 text-right">
