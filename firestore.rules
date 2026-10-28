@@ -6,15 +6,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Configurable host emails or admin claim
+    // Explicit allow-list of organizer/host emails and admin claims
+    // To add more host emails, add them to the list below or grant admin custom claim.
     function isHost() {
-      return isAuthenticated() && 
-        (request.auth.token.admin == true || 
-         request.auth.token.email.matches('.*@gmail[.]com') ||
-         request.auth.token.email.matches('.*gdg.*'));
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.email in [
+          'ghaidtalsh2@gmail.com',
+          'host@overload503.local',
+          'admin@overload503.local'
+        ]
+      );
     }
 
-    // Name reservation: create-only! Cannot overwrite or delete
+    // Name reservation: create-only! Cannot overwrite or delete existing names
     match /name_reservations/{nameId} {
       allow read: if true;
       allow create: if request.resource.data.displayName is string &&
@@ -23,27 +28,40 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Single fixed event document
+    // Single fixed event document (events/event_503)
     match /events/{eventId} {
       // Anyone can read event state (agents follow host timing & station)
       allow read: if true;
       
-      // Only authenticated host can change event state, station, deadlines, or health
+      // Only authenticated host can change event state, timeline, deadlines, or server health
       allow write: if isHost();
 
       // Agents subcollection
       match /agents/{agentId} {
         allow read: if true;
 
-        // An agent can register themselves once with initial 0 score
+        // An agent can register themselves once with initial 0 score and empty badges
         allow create: if isAuthenticated() && 
+                      request.resource.data.id == agentId &&
                       request.resource.data.score == 0 &&
-                      request.resource.data.id == agentId;
+                      (!('badges' in request.resource.data) || request.resource.data.badges.size() == 0);
 
-        // Agents can update their answer choices or bet, or host can compute scores
-        allow update: if isHost() || (isAuthenticated() && request.auth.uid == agentId);
+        // Host can update anything (including score, rank, badges).
+        // Agents can ONLY update their own activity/interaction fields (never score, rank, or badges!)
+        allow update: if isHost() || (
+          isAuthenticated() && 
+          request.auth.uid == agentId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'lastActive',
+            'typedEvent',
+            'answerChoice',
+            'betChoice',
+            'betStake',
+            'currentStation'
+          ])
+        );
 
-        // Only host can kick agents
+        // Only host can kick or remove agents
         allow delete: if isHost();
       }
     }

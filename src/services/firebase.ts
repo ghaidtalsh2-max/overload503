@@ -363,6 +363,68 @@ export const GameService = {
     }
   },
 
+  // Start lobby countdown (sets future roundStartAt)
+  async startLobbyCountdown(futureRoundStartAt: number): Promise<void> {
+    await this.updateEventState({
+      roundStartAt: futureRoundStartAt,
+      status: 'STABLE'
+    });
+  },
+
+  // Start incident immediately (sets roundStartAt to now)
+  async startIncidentNow(): Promise<void> {
+    await this.updateEventState({
+      roundStartAt: Date.now(),
+      status: 'INCIDENT_ACTIVE',
+      activeAlarm: true,
+      currentStation: 1
+    });
+  },
+
+  // Toggle pause
+  async togglePause(): Promise<void> {
+    const current = localBus.getStorage('event_state') || INITIAL_EVENT_STATE;
+    const isPaused = current.pausedOffsetSec !== undefined && current.pausedOffsetSec > 0;
+    if (isPaused) {
+      // Resume
+      const pausedDuration = Date.now() - (current.pausedAt || Date.now());
+      const newStart = (current.roundStartAt || Date.now()) + pausedDuration;
+      await this.updateEventState({
+        roundStartAt: newStart,
+        pausedOffsetSec: 0,
+        pausedAt: null
+      });
+    } else {
+      // Pause
+      await this.updateEventState({
+        pausedOffsetSec: current.roundStartAt ? Math.floor((Date.now() - current.roundStartAt) / 1000) : 0,
+        pausedAt: Date.now()
+      });
+    }
+  },
+
+  // Skip to next phase (shifts roundStartAt backward by 40s)
+  async skipToNextPhase(): Promise<void> {
+    const current = localBus.getStorage('event_state') || INITIAL_EVENT_STATE;
+    const currentStart = current.roundStartAt || Date.now();
+    await this.updateEventState({
+      roundStartAt: currentStart - 42000
+    });
+  },
+
+  // End game immediately (marks SECURED)
+  async endGameNow(): Promise<void> {
+    await this.updateEventState({
+      roundStartAt: Date.now() - 250000,
+      status: 'CONCLUDED',
+      activeAlarm: false
+    });
+  },
+
+  postKillFeedItem(item: Omit<KillFeedItem, 'id' | 'timestamp'>): void {
+    this.publishKillFeedItem(item);
+  },
+
   // Subscribe to All Agents
   subscribeToAgents(cb: (agents: Agent[]) => void): () => void {
     if (this.isCloud()) {

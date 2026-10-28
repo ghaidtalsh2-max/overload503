@@ -1,36 +1,71 @@
-import { StationId, Subphase } from '../types/game';
+// src/services/timelineService.ts
+// Autopilot timeline driven by a single authoritative clock (roundStartAt)
+// All devices derive the identical phase, station, and second without drift.
+
+export type GamePhase =
+  | 'LOBBY'
+  | 'BREACH'
+  | 'LOGIN'
+  | 'STATION_1'
+  | 'DOOR_1'
+  | 'STATION_2'
+  | 'DOOR_2'
+  | 'STATION_3'
+  | 'DOOR_3'
+  | 'STATION_4'
+  | 'SECURED';
 
 export interface TimelineState {
-  phase: 'LOBBY' | 'BREACH' | 'STATION' | 'DOOR' | 'SECURED';
-  currentStation: StationId;
-  subphase: Subphase;
-  inStationSeconds: number;
-  stationTimeRemaining: number;
-  totalTimeRemaining: number; // Seconds left until 210s (SECURED)
+  phase: GamePhase;
+  currentStation: 0 | 1 | 2 | 3 | 4;
+  inPhaseSeconds: number;
+  phaseDuration: number;
+  totalTimeRemaining: number; // Seconds left until SECURED
+  overloadText: string;       // Formatted mm:ss
   activeAlarm: boolean;
-  threatLevel: number; // 1 to 5
-  scriptedEvent: 'NONE' | 'ATTACK_WAVE' | 'POWER_FLICKER' | 'FREEZE_SPAWN';
+  threatLevel: number;        // 1 to 5
+  scriptedEvent: 'NONE' | 'ATTACK_WAVE' | 'WORKER_CRASH' | 'SESSION_ALERT' | 'POWER_FLICKER' | 'FREEZE_SPAWN';
   doorCode: string;
   doorCodeExpiresIn: number;
   last10SecondsPulse: boolean;
-  serverHealthAlertLevel: 0 | 1 | 2 | 3; // 0=norm, 1=<50%, 2=<20%, 3=0%
+  serverHealthAlertLevel: 0 | 1 | 2 | 3; // 0=normal, 1=<50%, 2=<20%, 3=0%
   breachHeadline?: string;
-  overloadText: string;
+  notificationsCount: number; // how many notifications to reveal in LOBBY
 }
 
-export const TOTAL_ROUND_SECONDS = 210; // 3:30 total time until SECURED
+// Durations of each phase in seconds (Total = 260s ~ 4.3 mins)
+export const PHASE_DURATIONS: Record<GamePhase, number> = {
+  LOBBY: 45,       // Countdown in lobby with arriving notifications
+  BREACH: 8,       // Giant glitch alert
+  LOGIN: 15,       // Terminal authentication step
+  STATION_1: 45,   // Type-to-block falling requests (CVE-2026-109618)
+  DOOR_1: 8,       // Door code transition
+  STATION_2: 45,   // Heap blocks & stale pointer 0x7f3a (CVE-2026-109619)
+  DOOR_2: 8,       // Door code transition
+  STATION_3: 40,   // OPcache conveyor flag box-12 & sessions rotate
+  DOOR_3: 8,       // Door code transition
+  STATION_4: 45,   // Terminal fix with patch validation
+  SECURED: 9999    // Hall of Defenders & paper bridge
+};
 
-/**
- * Deterministic Door Code generator per 8s window slot
- */
+export const TOTAL_GAME_PLAY_SECONDS =
+  PHASE_DURATIONS.BREACH +
+  PHASE_DURATIONS.LOGIN +
+  PHASE_DURATIONS.STATION_1 +
+  PHASE_DURATIONS.DOOR_1 +
+  PHASE_DURATIONS.STATION_2 +
+  PHASE_DURATIONS.DOOR_2 +
+  PHASE_DURATIONS.STATION_3 +
+  PHASE_DURATIONS.DOOR_3 +
+  PHASE_DURATIONS.STATION_4; // 214 seconds ~ 3:34
+
 export function getDoorCodeForSlot(slotIndex: number): string {
-  // Deterministic 4-digit code using linear congruential formula
   const base = ((slotIndex * 3719 + 4821) % 9000) + 1000;
   return base.toString();
 }
 
 /**
- * Pure function that derives the entire game state from elapsed seconds
+ * Pure function deriving TimelineState from seconds elapsed since roundStartAt
  */
 export function deriveTimelineState(
   elapsedSec: number,
@@ -38,34 +73,33 @@ export function deriveTimelineState(
 ): TimelineState {
   // 1. Health Alert Escalation
   let healthLevel: 0 | 1 | 2 | 3 = 0;
-  if (sharedServerHealth <= 0) {
-    healthLevel = 3;
-  } else if (sharedServerHealth < 20) {
-    healthLevel = 2;
-  } else if (sharedServerHealth < 50) {
-    healthLevel = 1;
-  }
+  if (sharedServerHealth <= 0) healthLevel = 3;
+  else if (sharedServerHealth < 20) healthLevel = 2;
+  else if (sharedServerHealth < 50) healthLevel = 1;
 
-  // 2. Door Code 8s cycle (independent deterministic clock)
-  const doorSlot = Math.floor(elapsedSec / 8);
+  // 2. Rotating door code every 8 seconds
+  const doorSlot = Math.floor(Math.max(0, elapsedSec) / 8);
   const doorCode = getDoorCodeForSlot(doorSlot);
-  const doorCodeExpiresIn = Math.max(1, 8 - (Math.floor(elapsedSec) % 8));
+  const doorCodeExpiresIn = Math.max(1, 8 - (Math.floor(Math.max(0, elapsedSec)) % 8));
 
-  // Countdown timer: equals remaining scripted time
-  const totalTimeRemaining = Math.max(0, TOTAL_ROUND_SECONDS - Math.floor(elapsedSec));
-  const mm = String(Math.floor(totalTimeRemaining / 60)).padStart(2, '0');
-  const ss = String(totalTimeRemaining % 60).padStart(2, '0');
+  // 3. Countdown timer calculations
+  const totalRemaining = Math.max(0, TOTAL_GAME_PLAY_SECONDS - Math.max(0, Math.floor(elapsedSec)));
+  const mm = String(Math.floor(totalRemaining / 60)).padStart(2, '0');
+  const ss = String(totalRemaining % 60).padStart(2, '0');
   const overloadText = `${mm}:${ss}`;
 
-  // PHASE A: LOBBY (elapsedSec < 0)
+  // PHASE 0: LOBBY (elapsedSec < 0)
   if (elapsedSec < 0) {
+    const lobbySecsLeft = Math.abs(Math.floor(elapsedSec));
+    // Notifications arrive gradually in lobby
+    const notifCount = elapsedSec < -30 ? 1 : elapsedSec < -20 ? 2 : elapsedSec < -10 ? 3 : 4;
     return {
       phase: 'LOBBY',
       currentStation: 0,
-      subphase: 'NORMAL',
-      inStationSeconds: 0,
-      stationTimeRemaining: 0,
-      totalTimeRemaining: TOTAL_ROUND_SECONDS,
+      inPhaseSeconds: 45 - lobbySecsLeft,
+      phaseDuration: 45,
+      totalTimeRemaining: TOTAL_GAME_PLAY_SECONDS,
+      overloadText: '03:34',
       activeAlarm: false,
       threatLevel: 1,
       scriptedEvent: 'NONE',
@@ -73,68 +107,90 @@ export function deriveTimelineState(
       doorCodeExpiresIn,
       last10SecondsPulse: false,
       serverHealthAlertLevel: 0,
-      overloadText: '03:30'
+      notificationsCount: notifCount
     };
   }
 
-  // PHASE B: 0:00 - 0:08 BREACH (8 seconds)
-  if (elapsedSec < 8) {
+  let cursor = 0;
+
+  // 1. BREACH (0 to 8s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.BREACH) {
+    const inSec = elapsedSec - cursor;
     return {
       phase: 'BREACH',
-      currentStation: 1,
-      subphase: 'NORMAL',
-      inStationSeconds: elapsedSec,
-      stationTimeRemaining: 8 - elapsedSec,
-      totalTimeRemaining,
+      currentStation: 0,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.BREACH,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
       activeAlarm: true,
-      threatLevel: 4,
+      threatLevel: inSec > 4 ? 5 : 4,
       scriptedEvent: 'NONE',
       doorCode,
       doorCodeExpiresIn,
       last10SecondsPulse: false,
       serverHealthAlertLevel: healthLevel,
-      breachHeadline: "The flaw isn't in your site... it's beneath it.",
-      overloadText
+      breachHeadline: 'الخلل ليس في موقعك... بل تحته',
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.BREACH;
 
-  // PHASE C: 0:08 - 0:48 STATION 1 (THE REQUEST) (40s duration: 8s to 48s)
-  if (elapsedSec < 48) {
-    const s1Elapsed = elapsedSec - 8;
-    const isNormal = s1Elapsed < 6;
-    const isBreak = s1Elapsed >= 6 && s1Elapsed < 8;
-    const subphase: Subphase = isNormal ? 'NORMAL' : isBreak ? 'BREAK' : 'FIX';
-    const isAttackWave = s1Elapsed >= 25 && s1Elapsed <= 29;
-    const last10 = 40 - s1Elapsed <= 10;
-
+  // 2. LOGIN (8 to 23s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.LOGIN) {
+    const inSec = elapsedSec - cursor;
     return {
-      phase: 'STATION',
+      phase: 'LOGIN',
+      currentStation: 0,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.LOGIN,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: true,
+      threatLevel: 4,
+      scriptedEvent: 'NONE',
+      doorCode,
+      doorCodeExpiresIn,
+      last10SecondsPulse: PHASE_DURATIONS.LOGIN - inSec <= 5,
+      serverHealthAlertLevel: healthLevel,
+      notificationsCount: 5
+    };
+  }
+  cursor += PHASE_DURATIONS.LOGIN;
+
+  // 3. STATION 1: THE REQUEST (23 to 68s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.STATION_1) {
+    const inSec = elapsedSec - cursor;
+    const isAttackWave = inSec >= 20 && inSec <= 28;
+    return {
+      phase: 'STATION_1',
       currentStation: 1,
-      subphase,
-      inStationSeconds: s1Elapsed,
-      stationTimeRemaining: Math.max(0, 40 - Math.floor(s1Elapsed)),
-      totalTimeRemaining,
-      activeAlarm: !isNormal,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.STATION_1,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: true,
       threatLevel: isAttackWave ? 5 : 4,
       scriptedEvent: isAttackWave ? 'ATTACK_WAVE' : 'NONE',
       doorCode,
       doorCodeExpiresIn,
-      last10SecondsPulse: last10,
+      last10SecondsPulse: PHASE_DURATIONS.STATION_1 - inSec <= 10,
       serverHealthAlertLevel: healthLevel,
-      overloadText
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.STATION_1;
 
-  // PHASE D: 0:48 - 0:56 DOOR 1 (8 seconds: 48s to 56s)
-  if (elapsedSec < 56) {
-    const doorElapsed = elapsedSec - 48;
+  // 4. DOOR 1 (68 to 76s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.DOOR_1) {
+    const inSec = elapsedSec - cursor;
     return {
-      phase: 'DOOR',
+      phase: 'DOOR_1',
       currentStation: 1,
-      subphase: 'DOOR_CODE',
-      inStationSeconds: doorElapsed,
-      stationTimeRemaining: Math.max(0, 8 - Math.floor(doorElapsed)),
-      totalTimeRemaining,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.DOOR_1,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
       activeAlarm: false,
       threatLevel: 3,
       scriptedEvent: 'NONE',
@@ -142,47 +198,45 @@ export function deriveTimelineState(
       doorCodeExpiresIn,
       last10SecondsPulse: false,
       serverHealthAlertLevel: healthLevel,
-      overloadText
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.DOOR_1;
 
-  // PHASE E: 0:56 - 1:36 STATION 2 (THE MEMORY) (40s duration: 56s to 96s)
-  if (elapsedSec < 96) {
-    const s2Elapsed = elapsedSec - 56;
-    const isNormal = s2Elapsed < 6;
-    const isBreak = s2Elapsed >= 6 && s2Elapsed < 8;
-    const subphase: Subphase = isNormal ? 'NORMAL' : isBreak ? 'BREAK' : 'FIX';
-    const isFreeze = s2Elapsed >= 15 && s2Elapsed <= 22;
-    const last10 = 40 - s2Elapsed <= 10;
-
+  // 5. STATION 2: THE MEMORY (76 to 121s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.STATION_2) {
+    const inSec = elapsedSec - cursor;
+    const isFreeze = inSec >= 15 && inSec <= 20;
+    const isWorkerCrash = inSec >= 25 && inSec <= 30;
     return {
-      phase: 'STATION',
+      phase: 'STATION_2',
       currentStation: 2,
-      subphase,
-      inStationSeconds: s2Elapsed,
-      stationTimeRemaining: Math.max(0, 40 - Math.floor(s2Elapsed)),
-      totalTimeRemaining,
-      activeAlarm: !isNormal,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.STATION_2,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: true,
       threatLevel: 4,
-      scriptedEvent: isFreeze ? 'FREEZE_SPAWN' : 'NONE',
+      scriptedEvent: isFreeze ? 'FREEZE_SPAWN' : isWorkerCrash ? 'WORKER_CRASH' : 'NONE',
       doorCode,
       doorCodeExpiresIn,
-      last10SecondsPulse: last10,
+      last10SecondsPulse: PHASE_DURATIONS.STATION_2 - inSec <= 10,
       serverHealthAlertLevel: healthLevel,
-      overloadText
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.STATION_2;
 
-  // PHASE F: 1:36 - 1:44 DOOR 2 (8 seconds: 96s to 104s)
-  if (elapsedSec < 104) {
-    const doorElapsed = elapsedSec - 96;
+  // 6. DOOR 2 (121 to 129s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.DOOR_2) {
+    const inSec = elapsedSec - cursor;
     return {
-      phase: 'DOOR',
+      phase: 'DOOR_2',
       currentStation: 2,
-      subphase: 'DOOR_CODE',
-      inStationSeconds: doorElapsed,
-      stationTimeRemaining: Math.max(0, 8 - Math.floor(doorElapsed)),
-      totalTimeRemaining,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.DOOR_2,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
       activeAlarm: false,
       threatLevel: 3,
       scriptedEvent: 'NONE',
@@ -190,99 +244,87 @@ export function deriveTimelineState(
       doorCodeExpiresIn,
       last10SecondsPulse: false,
       serverHealthAlertLevel: healthLevel,
-      overloadText
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.DOOR_2;
 
-  // PHASE G: 1:44 - 2:24 STATION 3 (THE OPCACHE) (40s duration: 104s to 144s)
-  if (elapsedSec < 144) {
-    const s3Elapsed = elapsedSec - 104;
-    const isNormal = s3Elapsed < 6;
-    const isBreak = s3Elapsed >= 6 && s3Elapsed < 8;
-    const subphase: Subphase = isNormal ? 'NORMAL' : isBreak ? 'BREAK' : 'FIX';
-    const isFlicker = s3Elapsed >= 15 && s3Elapsed <= 17;
-    const last10 = 40 - s3Elapsed <= 10;
-
+  // 7. STATION 3: THE OPCACHE (129 to 169s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.STATION_3) {
+    const inSec = elapsedSec - cursor;
+    const isSessionAlert = inSec >= 18 && inSec <= 25;
     return {
-      phase: 'STATION',
+      phase: 'STATION_3',
       currentStation: 3,
-      subphase,
-      inStationSeconds: s3Elapsed,
-      stationTimeRemaining: Math.max(0, 40 - Math.floor(s3Elapsed)),
-      totalTimeRemaining,
-      activeAlarm: !isNormal,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.STATION_3,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: true,
       threatLevel: 4,
+      scriptedEvent: isSessionAlert ? 'SESSION_ALERT' : 'NONE',
+      doorCode,
+      doorCodeExpiresIn,
+      last10SecondsPulse: PHASE_DURATIONS.STATION_3 - inSec <= 10,
+      serverHealthAlertLevel: healthLevel,
+      notificationsCount: 5
+    };
+  }
+  cursor += PHASE_DURATIONS.STATION_3;
+
+  // 8. DOOR 3 (169 to 177s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.DOOR_3) {
+    const inSec = elapsedSec - cursor;
+    return {
+      phase: 'DOOR_3',
+      currentStation: 3,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.DOOR_3,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: false,
+      threatLevel: 3,
+      scriptedEvent: 'NONE',
+      doorCode,
+      doorCodeExpiresIn,
+      last10SecondsPulse: false,
+      serverHealthAlertLevel: healthLevel,
+      notificationsCount: 5
+    };
+  }
+  cursor += PHASE_DURATIONS.DOOR_3;
+
+  // 9. STATION 4: THE FIX (177 to 222s)
+  if (elapsedSec < cursor + PHASE_DURATIONS.STATION_4) {
+    const inSec = elapsedSec - cursor;
+    const isFlicker = inSec >= 12 && inSec <= 14;
+    return {
+      phase: 'STATION_4',
+      currentStation: 4,
+      inPhaseSeconds: inSec,
+      phaseDuration: PHASE_DURATIONS.STATION_4,
+      totalTimeRemaining: totalRemaining,
+      overloadText,
+      activeAlarm: true,
+      threatLevel: inSec > 35 ? 5 : 4,
       scriptedEvent: isFlicker ? 'POWER_FLICKER' : 'NONE',
       doorCode,
       doorCodeExpiresIn,
-      last10SecondsPulse: last10,
+      last10SecondsPulse: PHASE_DURATIONS.STATION_4 - inSec <= 10,
       serverHealthAlertLevel: healthLevel,
-      overloadText
+      notificationsCount: 5
     };
   }
+  cursor += PHASE_DURATIONS.STATION_4;
 
-  // PHASE H: 2:24 - 2:32 DOOR 3 (8 seconds: 144s to 152s)
-  if (elapsedSec < 152) {
-    const doorElapsed = elapsedSec - 144;
-    return {
-      phase: 'DOOR',
-      currentStation: 3,
-      subphase: 'DOOR_CODE',
-      inStationSeconds: doorElapsed,
-      stationTimeRemaining: Math.max(0, 8 - Math.floor(doorElapsed)),
-      totalTimeRemaining,
-      activeAlarm: false,
-      threatLevel: 3,
-      scriptedEvent: 'NONE',
-      doorCode,
-      doorCodeExpiresIn,
-      last10SecondsPulse: false,
-      serverHealthAlertLevel: healthLevel,
-      overloadText
-    };
-  }
-
-  // PHASE I: 2:32 - 3:30 STATION 4 (THE FIX) (58s duration: 152s to 210s)
-  if (elapsedSec < 210) {
-    const s4Elapsed = elapsedSec - 152;
-    // 0s to 20s: THE BET
-    // 20s to 26s: REVEAL
-    // 26s to 51s: SQUAD BATTLE
-    // 51s to 58s: WRAPUP
-    let subphase: Subphase = 'BET';
-    if (s4Elapsed >= 20 && s4Elapsed < 26) {
-      subphase = 'REVEAL';
-    } else if (s4Elapsed >= 26) {
-      subphase = 'BATTLE';
-    }
-    const last10 = 58 - s4Elapsed <= 10;
-
-    return {
-      phase: 'STATION',
-      currentStation: 4,
-      subphase,
-      inStationSeconds: s4Elapsed,
-      stationTimeRemaining: Math.max(0, 58 - Math.floor(s4Elapsed)),
-      totalTimeRemaining,
-      activeAlarm: true,
-      threatLevel: 4,
-      scriptedEvent: 'NONE',
-      doorCode,
-      doorCodeExpiresIn,
-      last10SecondsPulse: last10,
-      serverHealthAlertLevel: healthLevel,
-      overloadText
-    };
-  }
-
-  // PHASE J: 3:30+ (210s+) SECURED (HALL OF DEFENDERS)
+  // 10. SECURED (Hall of Defenders & Paper Bridge)
   return {
     phase: 'SECURED',
-    currentStation: 5,
-    subphase: 'TAKEAWAY',
-    inStationSeconds: elapsedSec - 210,
-    stationTimeRemaining: 0,
+    currentStation: 4,
+    inPhaseSeconds: elapsedSec - cursor,
+    phaseDuration: 9999,
     totalTimeRemaining: 0,
+    overloadText: '00:00',
     activeAlarm: false,
     threatLevel: 1,
     scriptedEvent: 'NONE',
@@ -290,6 +332,6 @@ export function deriveTimelineState(
     doorCodeExpiresIn,
     last10SecondsPulse: false,
     serverHealthAlertLevel: 0,
-    overloadText: '00:00'
+    notificationsCount: 5
   };
 }

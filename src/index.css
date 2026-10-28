@@ -385,8 +385,17 @@ body::before {
   display: flex !important;
   flex-direction: column !important;
   justify-content: space-between !important;
-  flex: 1 1 0% !important;
-  padding: 0.5rem !important;
-  box-sizing: border-box !important;
 }
+
+/* Exact Reference Styles */
+.ch { padding: 3px 10px; border-radius: 10px; font: 800 12px "JetBrains Mono", monospace; border: 1px solid; white-space: nowrap; }
+.rq { font: 12px "JetBrains Mono", monospace; padding: 8px 12px; border-radius: 10px; border: 1px solid #2b3a66; background: #0b1430; display: flex; justify-content: space-between; align-items: center; direction: ltr; gap: 8px; }
+.gl { text-shadow: 3px 0 #EA4335, -3px 0 #4285F4, 0 0 30px rgba(234, 67, 53, 0.8); animation: gl 1.6s steps(2) infinite; }
+@keyframes gl { 50% { text-shadow: -4px 0 #EA4335, 4px 0 #4285F4, 0 0 40px rgba(234, 67, 53, 0.8); } }
+.lk { font: 13px / 1.8 "JetBrains Mono", monospace; direction: ltr; text-align: left; }
+.sc { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 4px); pointer-events: none; }
+.ttl { font: 800 11px "JetBrains Mono", monospace; letter-spacing: 2px; color: #8fa6d6; direction: ltr; }
+.bar { height: 8px; border-radius: 5px; background: #0b1430; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 5px; }
+
 
