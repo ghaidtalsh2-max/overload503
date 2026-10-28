@@ -20,6 +20,7 @@ import { AgentJoinView } from './components/AgentJoinView';
 import { AgentPhoneView } from './components/AgentPhoneView';
 import { ArcadeGameplayView } from './components/ArcadeGameplayView';
 import { MissionBriefingModal } from './components/MissionBriefingModal';
+import { CaseFileIntro } from './components/CaseFileIntro';
 
 export function App() {
   const [eventState, setEventState] = useState<EventState>(INITIAL_EVENT_STATE);
@@ -141,8 +142,9 @@ export function App() {
         localStorage.setItem('overload503_agent', JSON.stringify(newAgent));
       }
 
-      // If this is the first agent joining, auto-start the lobby countdown
-      if (!eventState.roundStartAt) {
+      // If this is the first agent joining or previous round has ended, start fresh lobby countdown
+      const isPastRound = eventState.roundStartAt && (Date.now() - eventState.roundStartAt > 260000);
+      if (!eventState.roundStartAt || isPastRound || eventState.status === 'CONCLUDED') {
         const roundStart = Date.now() + 45000; // 45 seconds lobby
         GameService.startLobbyCountdown(roundStart);
       }
@@ -277,12 +279,27 @@ export function App() {
           onEndGame={handleEndGame}
         />
       ) : !currentAgent ? (
-        <AgentJoinView
-          onRegister={handleRegister}
-          agents={agents}
+        <CaseFileIntro
+          onAcceptMission={handleRegister}
           isSubmitting={isSubmitting}
-          errorMessage={registerError}
-          onOpenBriefing={() => setShowBriefingModal(true)}
+        />
+      ) : (timeline.phase === 'LOBBY' || timeline.phase === 'BREACH') ? (
+        <HostScreen
+          timeline={timeline}
+          agents={agents}
+          killFeed={killFeed}
+          sharedHealth={eventState.sharedServerHealth}
+          heapMemoryUsage={72}
+          isMuted={isAudioMuted}
+          onToggleMute={() => {
+            const next = !isMuted();
+            setMuted(next);
+            setIsAudioMuted(next);
+          }}
+          onStartNow={handleStartNow}
+          onPauseResume={handlePauseResume}
+          onSkipPhase={handleSkipPhase}
+          onEndGame={handleEndGame}
         />
       ) : gameplayMode === 'arcade' ? (
         <ArcadeGameplayView

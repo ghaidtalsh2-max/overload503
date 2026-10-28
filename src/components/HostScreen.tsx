@@ -47,7 +47,7 @@ export const HostScreen: React.FC<HostScreenProps> = ({
   onSkipPhase,
   onEndGame
 }) => {
-  const [showControls, setShowControls] = useState(true);
+  const [showControls, setShowControls] = useState(false);
 
   const squadCounts = {
     sentinels: agents.filter((a) => a.squad === 'sentinels').length,
@@ -87,7 +87,7 @@ export const HostScreen: React.FC<HostScreenProps> = ({
       <div className="sc" />
 
       {/* Optional Host Override Bar (Hidden by default, hover/click toggle button) */}
-      <div className="absolute top-2 left-4 z-50 flex items-center gap-2">
+      <div className="absolute bottom-2 left-4 z-50 flex items-center gap-2">
         <button 
           onClick={() => setShowControls(!showControls)}
           className="px-2 py-1 rounded bg-[#0b1430]/80 border border-[#2b3a66] text-[10px] text-slate-400 font-mono hover:text-white"
@@ -145,8 +145,16 @@ export const HostScreen: React.FC<HostScreenProps> = ({
             </div>
 
             <div className="flex items-center gap-2.5">
-              <span className="mono text-[#FBBC05] font-extrabold">
-                INCIDENT IN 00:{String(Math.max(0, 45 - timeline.inPhaseSeconds)).padStart(2, '0')}
+              <button
+                type="button"
+                onClick={onStartNow}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-red-600 via-orange-500 to-yellow-500 hover:brightness-110 text-white font-black text-xs shadow-[0_0_20px_rgba(234,67,53,0.6)] transition flex items-center gap-1.5 cursor-pointer active:scale-95 animate-pulse"
+                title="إعلان حالة الطوارئ وانطلاق الهجوم فوراً"
+              >
+                <span>⚡ إطلاق الإنذار وبدء الهجوم فوراً (START NOW)</span>
+              </button>
+              <span className="mono text-[#FBBC05] font-extrabold text-sm">
+                00:{String(Math.max(0, 45 - timeline.inPhaseSeconds)).padStart(2, '0')}
               </span>
               <span className="ch border-[#8ab4ff] text-[#8ab4ff]">{agents.length} لاعب</span>
             </div>
